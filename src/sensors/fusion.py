@@ -75,6 +75,7 @@ class SensorFusion:
         self._running = False
         self._last_update_time = 0.0
         self._gyro_heading = 0.0  # Integrated gyro heading
+        self._last_gps_timestamp = 0.0  # Track last GPS update time
 
     def update(self) -> FusedState:
         """Run one fusion update cycle. Call at FUSION_UPDATE_RATE_HZ."""
@@ -122,7 +123,8 @@ class SensorFusion:
             log.warning("Heading from gyro only - will drift!")
 
         # --- Position fusion ---
-        if gps_ok:
+        if gps_ok and self.gps.data.timestamp != self._last_gps_timestamp:
+            self._last_gps_timestamp = self.gps.data.timestamp
             alpha = self._gps_alpha
             if self.state.latitude == 0.0:
                 # First fix, just set directly
@@ -132,6 +134,9 @@ class SensorFusion:
                 self.state.latitude = alpha * self.gps.data.latitude + (1 - alpha) * self.state.latitude
                 self.state.longitude = alpha * self.gps.data.longitude + (1 - alpha) * self.state.longitude
             self.state.speed = self.gps.data.speed_over_ground
+            self.state.gps_valid = True
+        elif gps_ok:
+            # GPS data unchanged, just keep current state
             self.state.gps_valid = True
         else:
             self.state.gps_valid = False

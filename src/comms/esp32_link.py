@@ -139,7 +139,7 @@ class ESP32Link:
                 self.send_thrust(cmd)
 
             # Read any responses from ESP32
-            await asyncio.get_event_loop().run_in_executor(None, self._read_response)
+            await asyncio.get_running_loop().run_in_executor(None, self._read_response)
 
             await asyncio.sleep(self._heartbeat_interval / 2)
 

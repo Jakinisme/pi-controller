@@ -259,7 +259,7 @@ class FirebaseBridge:
         log.info("Firebase telemetry loop started at %dHz", self._log_rate)
 
         while self._running:
-            await asyncio.get_event_loop().run_in_executor(None, self._send_telemetry)
+            await asyncio.get_running_loop().run_in_executor(None, self._send_telemetry)
             await asyncio.sleep(interval)
 
     async def command_listener_loop(self):
@@ -269,8 +269,8 @@ class FirebaseBridge:
         log.info("Firebase command listener started (poll %.1fs)", poll_interval)
 
         while self._running:
-            cmd = await asyncio.get_event_loop().run_in_executor(
-                None, self._listen_for_command
+            cmd = await asyncio.get_running_loop().run_in_executor(
+                None, self._listen_for_commands
             )
             if cmd is not None and self._command_handler is not None:
                 try:

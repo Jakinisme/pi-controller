@@ -8,6 +8,7 @@ Modes:
   MANUAL         - Direct thrust commands from dashboard (bypass PID)
 """
 
+import math
 import time
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -77,6 +78,10 @@ class WaypointNavigator:
         self._hold_lon: float = 0.0
         self._hold_heading: float = 0.0
 
+        # Last known position (for distance_to_waypoint)
+        self._last_lat: float = 0.0
+        self._last_lon: float = 0.0
+
     def start_waypoint_nav(self, waypoints: List[Waypoint]):
         """Begin waypoint navigation with a new waypoint list."""
         if not waypoints:
@@ -117,6 +122,9 @@ class WaypointNavigator:
         Returns:
             NavigationOutput with desired speed/heading or position errors.
         """
+        self._last_lat = lat
+        self._last_lon = lon
+
         if lat == 0.0 and lon == 0.0:
             # No GPS fix, stay idle
             return self.output
@@ -178,7 +186,6 @@ class WaypointNavigator:
     def _update_station_keeping(self, lat: float, lon: float, heading: float):
         """Dynamic positioning: compute NED position error."""
         # Convert GPS error to meters (north, east)
-        import math
         dlat = lat - self._hold_lat
         dlon = lon - self._hold_lon
         north_m = dlat * (math.pi / 180) * 6_371_000
@@ -214,7 +221,6 @@ class WaypointNavigator:
     def distance_to_waypoint(self) -> float:
         """Distance to current waypoint (requires last known position)."""
         wp = self.current_waypoint
-        if wp:
-            # This is approximate; caller should compute if needed
-            return 0.0
+        if wp and hasattr(self, '_last_lat'):
+            return haversine_distance(self._last_lat, self._last_lon, wp.latitude, wp.longitude)
         return 0.0

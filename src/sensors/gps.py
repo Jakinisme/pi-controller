@@ -81,7 +81,7 @@ class GPSReader:
         log.info("GPS read_loop started")
         while self._running:
             try:
-                line = await asyncio.get_event_loop().run_in_executor(
+                line = await asyncio.get_running_loop().run_in_executor(
                     None, self._read_line
                 )
                 if line:

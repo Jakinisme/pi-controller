@@ -211,7 +211,7 @@ class MPU6050Reader:
         while self._running:
             t0 = time.monotonic()
             try:
-                await asyncio.get_event_loop().run_in_executor(None, self.read)
+                await asyncio.get_running_loop().run_in_executor(None, self.read)
             except Exception as e:
                 log.error("IMU read error: %s", e)
 

@@ -103,6 +103,7 @@ CAMERA_BITRATE = "800k"                # Video bitrate
 CAMERA_HLS_SEGMENT_TIME = 2            # HLS segment length in seconds
 CAMERA_HLS_OUTPUT_DIR = "/tmp/hls"     # Where HLS segments are written
 CAMERA_HTTP_PORT = 8554                # HTTP port to serve HLS stream
+WEB_DASHBOARD_PORT = 8080               # Port for the web dashboard server
 # The stream URL will be: http://<rpi-ip>:8554/stream.m3u8
 # This URL is pushed to Firebase so the React dashboard can connect.
 

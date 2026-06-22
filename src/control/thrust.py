@@ -100,10 +100,9 @@ class ThrustComputer:
             surge, sway, yaw = self._compute_station_keeping(nav_output, state)
 
         elif nav_output.mode == NavigationState.MANUAL:
-            # Manual mode: nav_output carries direct thrust (set externally)
-            surge = nav_output.desired_north_m   # repurposed fields
-            sway = nav_output.desired_east_m
-            yaw = nav_output.hold_heading
+            # Manual mode: return the command set by set_manual_thrust() directly
+            self.command.timestamp = time.time()
+            return self.command
 
         elif nav_output.mode == NavigationState.IDLE:
             # All PIDs reset, zero thrust
