@@ -1,0 +1,20 @@
+# ASV pi-control Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Sensor communication
+pyserial>=3.5
+pynmea2>=1.19.0
+smbus2>=0.4.2
+
+# Math / Sensor fusion
+numpy>=1.24.0
+
+# Firebase (bidirectional: push telemetry + subscribe commands)
+firebase-admin>=6.2.0
+
+# ML inference
+scikit-learn>=1.3.0
+
+# Note: fastapi, uvicorn, websockets are NOT needed here.
+# The React dashboard (separate project) handles the UI.
+# RPi communicates with it via Firebase RTDB.
