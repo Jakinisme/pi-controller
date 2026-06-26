@@ -32,6 +32,7 @@ from src.config import (
     HEADING_PID_KP, HEADING_PID_KI, HEADING_PID_KD,
     HEADING_PID_INTEGRAL_LIMIT, HEADING_PID_OUTPUT_LIMIT,
     THRUST_DEADZONE,
+    WAYPOINT_MAX_SPEED,
 )
 from src.utils.geo import heading_error
 from src.utils.logger import setup_logger
@@ -142,7 +143,6 @@ class ThrustComputer:
         heading_factor = max(0.0, 1.0 - abs(heading_err) / 90.0)
         surge = nav.desired_speed * heading_factor
         # Normalize surge to [-1, 1] (desired_speed is in m/s, normalize by max)
-        from src.config import WAYPOINT_MAX_SPEED
         if WAYPOINT_MAX_SPEED > 0:
             surge = max(-1.0, min(1.0, surge / WAYPOINT_MAX_SPEED))
 

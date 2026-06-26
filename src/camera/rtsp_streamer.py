@@ -19,8 +19,7 @@ Requirements on RPi:
 
 import asyncio
 import os
-import signal
-import shutil
+
 import time
 from typing import Optional
 
@@ -69,6 +68,21 @@ class RTSPStreamer:
         # The HLS playlist URL that React dashboard will use
         self.stream_url = ""
 
+    @staticmethod
+    def _compute_bufsize(bitrate: str) -> str:
+        """Parse a bitrate string (e.g. '800k', '1M') and return 2x bufsize."""
+        br = bitrate.strip().lower()
+        if br.endswith("k"):
+            value = int(br[:-1]) * 2
+            return f"{value}k"
+        elif br.endswith("m"):
+            value = float(br[:-1]) * 2
+            return f"{value}M"
+        else:
+            # Raw numeric (bits/s)
+            value = int(br) * 2
+            return str(value)
+
     def _build_ffmpeg_cmd(self) -> list:
         """Build the ffmpeg command for camera -> HLS."""
         width, height = self._resolution.split("x")
@@ -86,7 +100,7 @@ class RTSPStreamer:
             "-tune", "zerolatency",
             "-b:v", self._bitrate,
             "-maxrate", self._bitrate,
-            "-bufsize", str(int(self._bitrate.replace("k", "")) * 2) + "k",
+            "-bufsize", self._compute_bufsize(self._bitrate),
             "-g", str(self._fps * 2),  # Keyframe every 2 seconds
             # HLS output
             "-f", "hls",

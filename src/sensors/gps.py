@@ -116,11 +116,11 @@ class GPSReader:
         now = time.time()
 
         if isinstance(msg, pynmea2.types.talker.GGA):
-            self.data.fix_quality = msg.gps_qual
-            self.data.num_satellites = msg.num_sats
+            self.data.fix_quality = int(msg.gps_qual or 0)
+            self.data.num_satellites = int(msg.num_sats or 0)
             self.data.altitude = float(msg.altitude) if msg.altitude else 0.0
 
-            if msg.gps_qual > 0 and msg.latitude != 0.0:
+            if self.data.fix_quality > 0 and msg.latitude != 0.0:
                 self.data.latitude = msg.latitude
                 self.data.longitude = msg.longitude
                 self.data.timestamp = now

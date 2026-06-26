@@ -254,7 +254,8 @@ class FirebaseBridge:
     # ------------------------------------------------------------------
     async def telemetry_loop(self):
         """Async loop: pushes queued telemetry at configured rate."""
-        self._running = True
+        if not self._running:
+            self._running = True
         interval = 1.0 / self._log_rate
         log.info("Firebase telemetry loop started at %dHz", self._log_rate)
 
@@ -264,7 +265,8 @@ class FirebaseBridge:
 
     async def command_listener_loop(self):
         """Async loop: polls Firebase for new commands and dispatches handler."""
-        self._running = True
+        if not self._running:
+            self._running = True
         poll_interval = 0.5  # Check every 500ms
         log.info("Firebase command listener started (poll %.1fs)", poll_interval)
 

@@ -74,6 +74,7 @@ class MPU6050Reader:
         self._gyro_offset_x = 0.0
         self._gyro_offset_y = 0.0
         self._gyro_offset_z = 0.0
+        self._is_calibrated = False
 
     def initialize(self) -> bool:
         """Initialize MPU6050 registers. Returns True on success."""
@@ -119,6 +120,7 @@ class MPU6050Reader:
         """Calibrate gyroscope offsets. Keep the IMU still during calibration."""
         log.info("Calibrating MPU6050 gyro (%d samples)... Keep IMU still!", samples)
         gx_sum = gy_sum = gz_sum = 0.0
+        success_count = 0
 
         for _ in range(samples):
             raw = self._read_raw_gyro()
@@ -126,14 +128,21 @@ class MPU6050Reader:
                 gx_sum += raw[0]
                 gy_sum += raw[1]
                 gz_sum += raw[2]
+                success_count += 1
             time.sleep(0.01)
 
-        self._gyro_offset_x = gx_sum / samples
-        self._gyro_offset_y = gy_sum / samples
-        self._gyro_offset_z = gz_sum / samples
+        if success_count == 0:
+            log.warning("Gyro calibration failed: no successful reads")
+            return
+
+        self._gyro_offset_x = gx_sum / success_count
+        self._gyro_offset_y = gy_sum / success_count
+        self._gyro_offset_z = gz_sum / success_count
+        self._is_calibrated = True
         log.info(
-            "Gyro offsets: x=%.2f, y=%.2f, z=%.2f deg/s",
+            "Gyro offsets: x=%.2f, y=%.2f, z=%.2f deg/s (%d/%d reads)",
             self._gyro_offset_x, self._gyro_offset_y, self._gyro_offset_z,
+            success_count, samples,
         )
 
     def _read_raw_accel(self):
@@ -203,7 +212,8 @@ class MPU6050Reader:
                 log.error("IMU read_loop aborted: init failed")
                 return
 
-        self.calibrate_gyro()
+        if not self._is_calibrated:
+            self.calibrate_gyro()
         self._running = True
         interval = 1.0 / self._sample_rate
 
