@@ -111,23 +111,32 @@ class WaypointNavigator:
         self.output = NavigationOutput()
         log.info("Navigation stopped -> IDLE")
 
-    def update(self, lat: float, lon: float, heading: float) -> NavigationOutput:
+    def update(
+        self,
+        lat: float,
+        lon: float,
+        heading: float,
+        gps_valid: bool = True,
+    ) -> NavigationOutput:
         """Update navigation state based on current position.
         
         Args:
             lat: Current latitude (degrees).
             lon: Current longitude (degrees).
             heading: Current fused heading (degrees).
+            gps_valid: True if the GPS has a valid fix.  When False the
+                navigator keeps the last output without recomputing.
         
         Returns:
             NavigationOutput with desired speed/heading or position errors.
         """
+        if not gps_valid:
+            # No GPS fix — hold last output, don't navigate blind
+            log.debug("GPS invalid, skipping nav update")
+            return self.output
+
         self._last_lat = lat
         self._last_lon = lon
-
-        if lat == 0.0 and lon == 0.0:
-            # No GPS fix, stay idle
-            return self.output
 
         if self.state == NavigationState.WAYPOINT_NAV:
             self._update_waypoint_nav(lat, lon, heading)

@@ -26,6 +26,10 @@ from src.utils.logger import setup_logger
 
 log = setup_logger("esp32")
 
+# Reconnect back-off settings
+_RECONNECT_INITIAL_S = 2.0
+_RECONNECT_MAX_S = 30.0
+
 
 class ESP32Link:
     """Serial communication link to ESP32 motor controller."""
@@ -87,6 +91,7 @@ class ESP32Link:
             True if sent successfully.
         """
         if not self._serial or not self._serial.is_open:
+            self._connected = False
             return False
 
         payload = {
@@ -105,6 +110,17 @@ class ESP32Link:
         except serial.SerialTimeoutException:
             self._send_errors += 1
             log.warning("ESP32 send timeout (errors: %d)", self._send_errors)
+            return False
+        except (serial.SerialException, OSError) as e:
+            self._send_errors += 1
+            self._connected = False
+            log.error("ESP32 serial lost: %s (errors: %d)", e, self._send_errors)
+            # Close the dead handle so is_connected reflects reality
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            self._serial = None
             return False
         except Exception as e:
             self._send_errors += 1
@@ -127,12 +143,29 @@ class ESP32Link:
         
         This keeps the ESP32 from triggering failsafe.
         Sends zero-thrust frames at the heartbeat interval.
+        Automatically reconnects if the serial link is lost.
         """
         self._running = True
+        reconnect_delay = _RECONNECT_INITIAL_S
         log.info("ESP32 heartbeat loop started (interval=%.2fs)", self._heartbeat_interval)
 
         while self._running:
-            # Send zero-thrust heartbeat
+            # ---- Reconnect gate ----
+            if not self.is_connected:
+                log.warning(
+                    "ESP32 disconnected — attempting reconnect in %.1fs",
+                    reconnect_delay,
+                )
+                await asyncio.sleep(reconnect_delay)
+                if self.open():
+                    reconnect_delay = _RECONNECT_INITIAL_S  # reset back-off
+                    log.info("ESP32 reconnected successfully")
+                else:
+                    # Exponential back-off, capped
+                    reconnect_delay = min(reconnect_delay * 2, _RECONNECT_MAX_S)
+                continue
+
+            # ---- Normal heartbeat ----
             now = time.time()
             if (now - self._last_send_time) >= self._heartbeat_interval:
                 cmd = ThrustCommand(surge=0.0, sway=0.0, yaw=0.0, timestamp=now)

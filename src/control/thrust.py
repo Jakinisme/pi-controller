@@ -6,17 +6,12 @@ into high-level thrust commands: [surge, sway, yaw].
 These are sent to ESP32 which handles motor mixing.
 Thruster layout: + configuration rotated 45° CW (radial outward thrust).
 
-        [NE]
-         |
-  [NW] --+-- [SE]
-         |
-        [SW]
-
 Mixing:
-  T_NE = surge - sway - yaw
-  T_NW = surge + sway + yaw
-  T_SE = surge - sway + yaw
-  T_SW = surge + sway - yaw
+# ✅ CORRECT mixing for push-pull catamaran
+T_NW =  surge - sway + yaw    # front-left
+T_NE =  surge + sway - yaw    # front-right
+T_SW = -surge + sway - yaw    # rear-left  (surge negated!)
+T_SE = -surge - sway + yaw    # rear-right (surge negated!)
 """
 
 import math

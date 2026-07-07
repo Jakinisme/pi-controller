@@ -267,7 +267,7 @@ class FirebaseBridge:
         """Async loop: polls Firebase for new commands and dispatches handler."""
         if not self._running:
             self._running = True
-        poll_interval = 0.5  # Check every 500ms
+        poll_interval = 0.1  # Check every 500ms
         log.info("Firebase command listener started (poll %.1fs)", poll_interval)
 
         while self._running:

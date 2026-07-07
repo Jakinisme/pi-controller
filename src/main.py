@@ -161,6 +161,7 @@ class ASVSystem:
                     lat=state.latitude,
                     lon=state.longitude,
                     heading=state.heading,
+                    gps_valid=state.gps_valid,
                 )
 
                 # 3. Compute thrust via PID controllers

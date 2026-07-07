@@ -32,7 +32,7 @@ FUSION_UPDATE_RATE_HZ = 20
 # Complementary filter weights (sum to 1.0)
 FUSION_GYRO_WEIGHT = 0.98       # Trust gyro for short-term heading changes
 FUSION_MAG_WEIGHT = 0.02        # Trust magnetometer for long-term drift correction
-FUSION_GPS_POSITION_ALPHA = 0.3 # Low-pass filter coefficient for GPS position
+FUSION_GPS_POSITION_ALPHA = 0.7 # Low-pass filter coefficient for GPS position
 
 # ---------------------------------------------------------------------------
 # PID Controller Gains
