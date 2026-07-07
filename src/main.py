@@ -44,8 +44,10 @@ from src.control.navigation import WaypointNavigator, Waypoint, NavigationState
 from src.control.thrust import ThrustComputer
 from src.comms.esp32_link import ESP32Link
 from src.comms.firebase_bridge import FirebaseBridge, RemoteCommand
-from src.ml.anomaly import AnomalyDetector
-from src.ml.prediction import DriftPredictor
+# pyrefly: ignore [missing-import]
+from src.ml.anomaly.py import AnomalyDetector
+# pyrefly: ignore [missing-import]
+from src.ml.prediction.py import DriftPredictor
 from src.camera.rtsp_streamer import RTSPStreamer
 from src.utils.logger import setup_logger
 
