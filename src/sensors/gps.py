@@ -1,6 +1,10 @@
 """
-NEO-6M GPS Reader via UART.
+NEO-6M GPS Reader via pigpio bit-bang UART on GPIO.
 Parses NMEA sentences for position, speed, and heading.
+
+Instead of pyserial, we use pigpio's bb_serial_read_open to
+receive GPS data on any GPIO pin (default: GPIO23).
+Requires pigpiod running on the RPi.
 """
 
 import asyncio
@@ -8,13 +12,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import serial
+import pigpio
 import pynmea2
 
-from src.config import GPS_SERIAL_PORT, GPS_BAUD_RATE, GPS_TIMEOUT_S
+from src.config import GPS_BB_GPIO, GPS_BAUD_RATE, GPS_TIMEOUT_S
 from src.utils.logger import setup_logger
 
 log = setup_logger("gps")
+
+# Maximum buffer size before forced clear (prevents memory leak on noise/bad wiring)
+_MAX_BUFFER_BYTES = 2048
 
 
 @dataclass
@@ -32,76 +39,94 @@ class GPSData:
 
 
 class GPSReader:
-    """Async reader for NEO-6M GPS module via UART serial."""
+    """Async reader for NEO-6M GPS module via pigpio bit-bang UART."""
 
     def __init__(
         self,
-        port: str = GPS_SERIAL_PORT,
+        gpio: int = GPS_BB_GPIO,
         baud: int = GPS_BAUD_RATE,
         timeout: float = GPS_TIMEOUT_S,
     ):
-        self._port = port
+        self._gpio = gpio
         self._baud = baud
         self._timeout = timeout
-        self._serial: Optional[serial.Serial] = None
+        self._pi: Optional[pigpio.pi] = None
+        self._bb_open = False
         self.data = GPSData()
         self._running = False
+        self._buffer = b""
 
     def open(self) -> bool:
-        """Open the serial port. Returns True on success."""
+        """Connect to pigpiod and open bit-bang serial on GPIO. Returns True on success."""
         try:
-            self._serial = serial.Serial(
-                port=self._port,
-                baudrate=self._baud,
-                timeout=1,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                bytesize=serial.EIGHTBITS,
+            self._pi = pigpio.pi()
+            if not self._pi.connected:
+                log.error("Cannot connect to pigpiod — is the daemon running?")
+                return False
+
+            # Open bit-bang serial: gpio, baud, data_bits (8)
+            self._pi.bb_serial_read_open(self._gpio, self._baud, 8)
+            self._bb_open = True
+            log.info(
+                "GPS bit-bang opened on GPIO%d @ %d baud (pigpio)",
+                self._gpio, self._baud,
             )
-            log.info("GPS opened on %s @ %d baud", self._port, self._baud)
             return True
-        except serial.SerialException as e:
-            log.error("Failed to open GPS port %s: %s", self._port, e)
+        except Exception as e:
+            log.error("Failed to open GPS bit-bang on GPIO%d: %s", self._gpio, e)
             return False
 
     def close(self):
-        """Close the serial port."""
-        if self._serial and self._serial.is_open:
-            self._serial.close()
-            log.info("GPS port closed")
+        """Close the bit-bang serial and disconnect from pigpiod."""
+        if self._pi:
+            if self._bb_open:
+                try:
+                    self._pi.bb_serial_read_close(self._gpio)
+                except Exception:
+                    pass
+                self._bb_open = False
+            self._pi.stop()
+            self._pi = None
+            log.info("GPS pigpio connection closed")
 
     async def read_loop(self):
         """Continuously read and parse NMEA sentences. Run as asyncio task."""
         self._running = True
-        if not self._serial or not self._serial.is_open:
+        if not self._bb_open:
             if not self.open():
-                log.error("GPS read_loop aborted: port not open")
+                log.error("GPS read_loop aborted: bit-bang not open")
                 return
 
         log.info("GPS read_loop started")
         while self._running:
             try:
-                line = await asyncio.get_running_loop().run_in_executor(
-                    None, self._read_line
-                )
-                if line:
-                    self._parse_nmea(line)
+                # Poll bit-bang buffer every 50ms
+                count, data = self._pi.bb_serial_read(self._gpio)
+                if count > 0:
+                    self._buffer += data[:count]
+
+                    # Safety valve: clear buffer if too large (noise / broken wire)
+                    if len(self._buffer) > _MAX_BUFFER_BYTES:
+                        log.warning(
+                            "GPS buffer overflow (%d bytes), clearing", len(self._buffer)
+                        )
+                        self._buffer = b""
+                        await asyncio.sleep(0.05)
+                        continue
+
+                    # Split into complete lines
+                    while b"\n" in self._buffer:
+                        line, self._buffer = self._buffer.split(b"\n", 1)
+                        sentence = line.decode("ascii", errors="ignore").strip()
+                        if sentence:
+                            self._parse_nmea(sentence)
+
             except Exception as e:
                 log.error("GPS read error: %s", e)
-                await asyncio.sleep(0.1)
+
+            await asyncio.sleep(0.05)
 
         self.close()
-
-    def _read_line(self) -> Optional[str]:
-        """Read a single NMEA line from serial (blocking, run in executor)."""
-        try:
-            if self._serial and self._serial.in_waiting:
-                raw = self._serial.readline()
-                return raw.decode("ascii", errors="ignore").strip()
-        except Exception:
-            pass
-        time.sleep(0.01)  # Small sleep to avoid busy-wait
-        return None
 
     def _parse_nmea(self, line: str):
         """Parse a single NMEA sentence and update GPSData."""
@@ -143,7 +168,7 @@ class GPSReader:
 
     @property
     def is_connected(self) -> bool:
-        return self._serial is not None and self._serial.is_open
+        return self._pi is not None and self._bb_open
 
     @property
     def has_fix(self) -> bool:

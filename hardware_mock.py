@@ -68,6 +68,8 @@ class _pigpio_pi:
         self._servo_pw = {}   # pin → pulsewidth
         self._pwm = {}
         self.connected = True
+        self._bb_pins = set()
+        self._bb_accum = 0.0   # accumulator for timed NMEA generation
 
     def set_servo_pulsewidth(self, pin, pulsewidth):
         self._servo_pw[pin] = pulsewidth
@@ -81,6 +83,37 @@ class _pigpio_pi:
     def write(self, pin, level): pass
     def read(self, pin): return 0
     def stop(self): pass
+
+    # ── bit-bang serial mock (GPS) ──────────────────────
+    def bb_serial_read_open(self, gpio, baud, data_bits=8):
+        self._bb_pins.add(gpio)
+        return 0
+
+    def bb_serial_read(self, gpio):
+        """Return fake NMEA GPGGA once per ~100ms call cadence."""
+        self._bb_accum += 1
+        if self._bb_accum < 2:          # produce data every other call (~100ms)
+            return 0, b""
+        self._bb_accum = 0
+
+        lat = -6.8969 + random.gauss(0, 0.000005)
+        lon = 112.0521 + random.gauss(0, 0.000005)
+        lat_deg = int(abs(lat))
+        lat_min = (abs(lat) - lat_deg) * 60
+        lon_deg = int(abs(lon))
+        lon_min = (abs(lon) - lon_deg) * 60
+        ns = 'S' if lat < 0 else 'N'
+        ew = 'E' if lon > 0 else 'W'
+        sentence = (f"$GPGGA,{time.strftime('%H%M%S.00')},"
+                    f"{lat_deg:02d}{lat_min:09.6f},{ns},"
+                    f"{lon_deg:03d}{lon_min:09.6f},{ew},"
+                    f"1,08,1.0,10.0,M,0,M,,*47\r\n")
+        raw = sentence.encode()
+        return len(raw), raw
+
+    def bb_serial_read_close(self, gpio):
+        self._bb_pins.discard(gpio)
+        return 0
 
 
 class _pigpio:

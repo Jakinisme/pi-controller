@@ -7,8 +7,8 @@ All constants, sensor addresses, PID gains, and system parameters.
 # Sensor Configuration
 # ---------------------------------------------------------------------------
 
-# NEO-6M GPS (UART)
-GPS_SERIAL_PORT = "/dev/serial0"  # or "/dev/ttyS0" on some RPi setups
+# NEO-6M GPS (pigpio bit-bang UART)
+GPS_BB_GPIO = 23              # GPS TX → GPIO23 (pin 16), bit-bang read via pigpiod
 GPS_BAUD_RATE = 9600
 GPS_TIMEOUT_S = 2.0  # seconds before declaring GPS lost
 
@@ -72,7 +72,7 @@ THRUST_DEADZONE = 0.05  # below this value, motor won't spin
 # ---------------------------------------------------------------------------
 # ESP32 Communication (UART serial — JSON frames over USB/UART)
 # ---------------------------------------------------------------------------
-ESP32_SERIAL_PORT = "/dev/ttyUSB0"  # USB serial to ESP32
+ESP32_SERIAL_PORT = "/dev/serial0"  # hardware UART to ESP32 (was /dev/ttyUSB0)
 ESP32_BAUD_RATE = 115200
 ESP32_HEARTBEAT_INTERVAL_S = 0.5    # Send heartbeat every 500ms
 ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe if no msg for 1s

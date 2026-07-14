@@ -3,6 +3,7 @@
 
 # Sensor communication
 pyserial>=3.5
+pigpio>=1.78
 pynmea2>=1.19.0
 smbus2>=0.4.2
 
