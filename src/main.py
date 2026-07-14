@@ -42,10 +42,9 @@ from src.control.navigation import WaypointNavigator, Waypoint, NavigationState
 from src.control.thrust import ThrustComputer
 from src.comms.esp32_link import ESP32Link
 from src.comms.firebase_bridge import FirebaseBridge, RemoteCommand
-# pyrefly: ignore [missing-import]
-from src.ml.anomaly.py import AnomalyDetector
-# pyrefly: ignore [missing-import]
-from src.ml.prediction.py import DriftPredictor
+# ML modules disabled — uncomment when available
+# from src.ml.anomaly import AnomalyDetector
+# from src.ml.prediction import DriftPredictor
 from src.utils.logger import setup_logger
 
 log = setup_logger("main")
@@ -83,9 +82,9 @@ class ASVSystem:
         self.esp32 = ESP32Link()
         self.firebase = FirebaseBridge(vehicle_id=FIREBASE_VEHICLE_ID)
 
-        # ML
-        self.anomaly_detector = AnomalyDetector()
-        self.drift_predictor = DriftPredictor()
+        # ML (disabled)
+        self.anomaly_detector = None
+        self.drift_predictor = None
 
         # Control loop rate
         self._control_rate_hz = FUSION_UPDATE_RATE_HZ
@@ -197,10 +196,9 @@ class ASVSystem:
     # ML LOOP  (~1Hz)
     # ------------------------------------------------------------------
     async def ml_loop(self):
-        """ML inference loop (~1Hz, non-blocking)."""
-        if not ML_ANOMALY_ENABLED and not ML_PREDICTION_ENABLED:
-            log.info("ML disabled")
-            return
+        """ML inference loop (~1Hz, non-blocking). Currently disabled."""
+        log.info("ML disabled (modules not available)")
+        return
 
         interval = 1.0 / ML_INFERENCE_RATE_HZ
         log.info("ML loop started at %dHz", ML_INFERENCE_RATE_HZ)
