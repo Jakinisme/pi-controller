@@ -11,7 +11,6 @@ DATA FLOW:
       sensors:   { gps_valid, imu_valid, mag_valid, num_satellites }
       anomaly:   { gps, imu, mag, score }
       nav:       { mode, waypoint_index, total_waypoints, distance_to_wp }
-      camera:    { stream_url }
       timestamp: <unix>
 
   React -> Firebase -> RPi (commands):
@@ -184,10 +183,6 @@ class FirebaseBridge:
         self.queue_telemetry("telemetry/anomaly", {
             "gps": gps, "imu": imu, "mag": mag, "score": round(score, 4),
         })
-
-    def push_camera_url(self, stream_url: str):
-        """Push the RTSP/HLS stream URL so the React dashboard knows where to connect."""
-        self.queue_telemetry("telemetry/camera", {"stream_url": stream_url})
 
     def _send_telemetry(self):
         """Batch-send all queued telemetry to Firebase."""

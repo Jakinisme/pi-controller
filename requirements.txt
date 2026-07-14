@@ -15,6 +15,7 @@ firebase-admin>=6.2.0
 # ML inference
 scikit-learn>=1.3.0
 
-# Note: fastapi, uvicorn, websockets are NOT needed here.
+# Note: fastapi, uvicorn are NOT needed here.
 # The React dashboard (separate project) handles the UI.
 # RPi communicates with it via Firebase RTDB.
+# RPi <-> ESP32 uses UART serial (see esp32_link.py).

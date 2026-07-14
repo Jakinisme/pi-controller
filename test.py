@@ -15,7 +15,7 @@ from src.utils.geo import haversine_distance, bearing, heading_error
 from src.control.pid import PIDController
 from src.control.navigation import WaypointNavigator, Waypoint, NavigationState, NavigationOutput
 from src.control.thrust import ThrustComputer
-from src.sensors.fusion import FusedState
+from src.sensors.fusion import FusedState, SensorFusion
 from src.sensors.gps import GPSReader
 
 class TestGeo:
@@ -78,6 +78,24 @@ class TestNavigation:
         assert out.mode == NavigationState.STATION_KEEP
         assert out.hold_heading == 45.0
         assert out.desired_north_m != 0.0
+
+class TestBlendAngle:
+    def test_wraparound_near_north(self):
+        # 359° and 1° are 2° apart; plain average would yield ~351°
+        result = SensorFusion._blend_angle(359, 1, 0.02)
+        assert result == pytest.approx(359.04, abs=0.01)
+        assert result > 358 or result < 2
+
+    def test_wraparound_halfway_shortest_path(self):
+        # 10° and 350° are 20° apart via north; midpoint is 0°, not 180°
+        result = SensorFusion._blend_angle(10, 350, 0.5)
+        assert result == pytest.approx(0.0, abs=0.01)
+
+    def test_weight_zero_returns_base(self):
+        assert SensorFusion._blend_angle(45.0, 90.0, 0.0) == pytest.approx(45.0)
+
+    def test_weight_one_returns_target(self):
+        assert SensorFusion._blend_angle(45.0, 90.0, 1.0) == pytest.approx(90.0)
 
 class TestThrustComputer:
     def test_idle(self):

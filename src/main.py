@@ -5,14 +5,13 @@ Orchestrates all subsystems via asyncio:
   - Sensor reading (GPS, IMU, Magnetometer)
   - Sensor fusion
   - Navigation / PID control
-  - ESP32 communication
+  - ESP32 communication (UART serial)
   - ML inference
   - Firebase bridge (bidirectional: push telemetry + subscribe commands)
-  - Camera stream (RTSP -> HLS for React dashboard)
 
 Architecture:
   RPi  <-- Firebase RTDB -->  React Dashboard (separate project)
-  RPi  -- HLS stream URL -->  React Dashboard (video via HLS.js)
+  RPi  -- UART serial ------>  ESP32 (motor controller)
 
 Usage:
     python -m src.main
@@ -23,7 +22,7 @@ import signal
 import socket
 import sys
 import time
-import os
+import os            
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,7 +33,6 @@ from src.config import (
     ML_PREDICTION_ENABLED,
     ML_INFERENCE_RATE_HZ,
     FIREBASE_VEHICLE_ID,
-    CAMERA_ENABLED,
 )
 from src.sensors.gps import GPSReader
 from src.sensors.imu import MPU6050Reader
@@ -48,7 +46,6 @@ from src.comms.firebase_bridge import FirebaseBridge, RemoteCommand
 from src.ml.anomaly.py import AnomalyDetector
 # pyrefly: ignore [missing-import]
 from src.ml.prediction.py import DriftPredictor
-from src.camera.rtsp_streamer import RTSPStreamer
 from src.utils.logger import setup_logger
 
 log = setup_logger("main")
@@ -85,9 +82,6 @@ class ASVSystem:
         # Communication
         self.esp32 = ESP32Link()
         self.firebase = FirebaseBridge(vehicle_id=FIREBASE_VEHICLE_ID)
-
-        # Camera
-        self.camera = RTSPStreamer()
 
         # ML
         self.anomaly_detector = AnomalyDetector()
@@ -259,22 +253,6 @@ class ASVSystem:
                 await asyncio.sleep(sleep_time)
 
     # ------------------------------------------------------------------
-    # CAMERA HEALTH MONITOR  (~0.1Hz)
-    # ------------------------------------------------------------------
-    async def camera_health_loop(self):
-        """Periodically check camera health and push stream URL to Firebase."""
-        while self._running:
-            if self.camera.is_running:
-                healthy = await self.camera.health_check()
-                if not healthy:
-                    log.warning("Camera stream unhealthy, restarting...")
-                    await self.camera.stop()
-                    rpi_ip = get_local_ip()
-                    await self.camera.start(rpi_ip)
-                    self.firebase.push_camera_url(self.camera.stream_url)
-            await asyncio.sleep(10)
-
-    # ------------------------------------------------------------------
     # RUN
     # ------------------------------------------------------------------
     async def run(self):
@@ -299,13 +277,6 @@ class ASVSystem:
         if not self.esp32.open():
             log.warning("ESP32 link failed - will retry")
 
-        # Start camera stream
-        if CAMERA_ENABLED:
-            started = await self.camera.start(rpi_ip)
-            if started:
-                self.firebase.push_camera_url(self.camera.stream_url)
-                log.info("Camera stream URL: %s", self.camera.stream_url)
-
         # Build task list
         tasks = [
             asyncio.create_task(self.gps.read_loop(), name="gps"),
@@ -319,11 +290,6 @@ class ASVSystem:
             asyncio.create_task(self.firebase.telemetry_loop(), name="fb_telemetry"),
             asyncio.create_task(self.firebase.command_listener_loop(), name="fb_commands"),
         ]
-
-        if CAMERA_ENABLED:
-            tasks.append(
-                asyncio.create_task(self.camera_health_loop(), name="camera_health")
-            )
 
         log.info("All subsystems started (%d tasks)", len(tasks))
 
@@ -349,7 +315,6 @@ class ASVSystem:
         self.fusion.stop()
         self.esp32.stop()
         self.firebase.stop()
-        await self.camera.stop()
 
         # Close hardware
         self.gps.close()

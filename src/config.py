@@ -70,7 +70,7 @@ THRUSTER_TILT_ANGLE_DEG = 45.0
 THRUST_DEADZONE = 0.05  # below this value, motor won't spin
 
 # ---------------------------------------------------------------------------
-# ESP32 Communication
+# ESP32 Communication (UART serial — JSON frames over USB/UART)
 # ---------------------------------------------------------------------------
 ESP32_SERIAL_PORT = "/dev/ttyUSB0"  # USB serial to ESP32
 ESP32_BAUD_RATE = 115200
@@ -92,20 +92,7 @@ FIREBASE_VEHICLE_ID = "asv-001"   # Unique ID for this vehicle
 #   React reads:  /vehicles/{id}/telemetry/... (listener)
 #   RPi reads:    /vehicles/{id}/commands/... (polling)
 
-# ---------------------------------------------------------------------------
-# Camera Configuration (RTSP / HLS Stream)
-# ---------------------------------------------------------------------------
-CAMERA_ENABLED = True
-CAMERA_DEVICE = "/dev/video0"          # USB cam or Pi Cam via libcamera
-CAMERA_RESOLUTION = "640x480"          # Lower = less CPU on RPi
-CAMERA_FPS = 15                        # Frames per second
-CAMERA_BITRATE = "800k"                # Video bitrate
-CAMERA_HLS_SEGMENT_TIME = 2            # HLS segment length in seconds
-CAMERA_HLS_OUTPUT_DIR = "/tmp/hls"     # Where HLS segments are written
-CAMERA_HTTP_PORT = 8554                # HTTP port to serve HLS stream
 WEB_DASHBOARD_PORT = 8080               # Port for the web dashboard server
-# The stream URL will be: http://<rpi-ip>:8554/stream.m3u8
-# This URL is pushed to Firebase so the React dashboard can connect.
 
 # ---------------------------------------------------------------------------
 # ML Inference

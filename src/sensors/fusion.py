@@ -77,6 +77,14 @@ class SensorFusion:
         self._gyro_heading = 0.0  # Integrated gyro heading
         self._last_gps_timestamp = 0.0  # Track last GPS update time
 
+    @staticmethod
+    def _blend_angle(base: float, target: float, weight: float) -> float:
+        """Blend base toward target by `weight`, taking the shortest path
+        across the 0/360 boundary. weight=0 returns base, weight=1 returns
+        target (mod 360)."""
+        diff = ((target - base + 180) % 360) - 180
+        return (base + weight * diff) % 360
+
     def update(self) -> FusedState:
         """Run one fusion update cycle. Call at FUSION_UPDATE_RATE_HZ."""
         now = time.time()
@@ -95,16 +103,14 @@ class SensorFusion:
             self._gyro_heading = (self._gyro_heading + gyro_delta) % 360
 
             # Complementary filter: blend gyro-propagated heading with magnetometer
-            fused_heading = (
-                self._gyro_weight * self._gyro_heading
-                + self._mag_weight * self.mag.data.heading
+            fused_heading = self._blend_angle(
+                self._gyro_heading, self.mag.data.heading, self._mag_weight
             )
 
             # GPS course correction when moving fast enough
             if gps_ok and self.gps.data.speed_over_ground > self.GPS_HEADING_MIN_SPEED:
                 gps_heading = self.gps.data.true_course
-                # Small correction weight for GPS heading
-                fused_heading = 0.95 * fused_heading + 0.05 * gps_heading
+                fused_heading = self._blend_angle(fused_heading, gps_heading, 0.05)
 
             self.state.heading = fused_heading % 360
             # Sync gyro heading to fused for next iteration
