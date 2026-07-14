@@ -143,6 +143,8 @@ class ASVSystem:
         """
         interval = 1.0 / self._control_rate_hz
         log.info("Control loop started at %dHz", self._control_rate_hz)
+        _last_status_log = 0.0       # periodic status print
+        _STATUS_LOG_INTERVAL = 5.0   # seconds
 
         while self._running:
             t0 = time.monotonic()
@@ -183,6 +185,24 @@ class ASVSystem:
                     self.navigator.current_wp_index,
                     len(self.navigator.waypoints),
                 )
+
+                # --- Periodic status log (every 5s) ---
+                now_mono = time.monotonic()
+                if now_mono - _last_status_log >= _STATUS_LOG_INTERVAL:
+                    _last_status_log = now_mono
+                    gd = self.gps.data
+                    log.info(
+                        "STATUS | GPS fix=%s sats=%d | "
+                        "pos=(%.6f, %.6f) spd=%.2f m/s crs=%.1f° | "
+                        "heading=%.1f° | "
+                        "thrust S=%.3f W=%.3f Y=%.3f | nav=%s",
+                        gd.valid, gd.num_satellites,
+                        state.latitude, state.longitude,
+                        state.speed, gd.true_course,
+                        state.heading,
+                        thrust_cmd.surge, thrust_cmd.sway, thrust_cmd.yaw,
+                        self.navigator.state.name,
+                    )
 
             except Exception as e:
                 log.error("Control loop error: %s", e)
