@@ -2,6 +2,10 @@
 ASV pi-control Configuration
 All constants, sensor addresses, PID gains, and system parameters.
 """
+from pathlib import Path
+
+# Base directory: ~/pi-controller (works for any user / OS)
+BASE_DIR = Path.home() / "pi-controller"
 
 # ---------------------------------------------------------------------------
 # Sensor Configuration
@@ -81,7 +85,7 @@ ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe if no msg for 1s
 # Firebase Configuration
 # ---------------------------------------------------------------------------
 FIREBASE_ENABLED = True  # Set True and provide credentials
-FIREBASE_CREDENTIALS_PATH = "/home/pi/pi-control/firebase-credentials.json"
+FIREBASE_CREDENTIALS_PATH = str(BASE_DIR / "firebase-credentials.json")
 FIREBASE_DATABASE_URL = "https://your-project.firebaseio.com"
 FIREBASE_LOG_RATE_HZ = 2          # Push telemetry at 2Hz
 FIREBASE_VEHICLE_ID = "asv-001"   # Unique ID for this vehicle
@@ -101,12 +105,12 @@ ML_ANOMALY_ENABLED = True
 ML_PREDICTION_ENABLED = True
 ML_INFERENCE_RATE_HZ = 1          # Run ML models at 1Hz
 ML_ANOMALY_HISTORY_SIZE = 500     # Number of samples for Isolation Forest
-ML_MODEL_PATH = "/home/pi/pi-control/models"
+ML_MODEL_PATH = str(BASE_DIR / "models")
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 LOG_LEVEL = "INFO"
-LOG_FILE = "/home/pi/pi-control/logs/asv.log"
+LOG_FILE = str(BASE_DIR / "logs" / "asv.log")
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
