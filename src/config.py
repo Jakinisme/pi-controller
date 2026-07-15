@@ -19,9 +19,9 @@ MPU6050_ACCEL_RANGE = 2       # ±2g
 MPU6050_GYRO_RANGE = 250      # ±250 deg/s
 MPU6050_SAMPLE_RATE_HZ = 50
 
-# GY-273 / HMC5883L Magnetometer (I2C)
+# GY-273 / QMC5883P Magnetometer (I2C) — board labeled HMC5883L but chip is QMC5883P
 HMC5883L_I2C_BUS = 1
-HMC5883L_I2C_ADDR = 0x1E
+HMC5883L_I2C_ADDR = 0x2C
 HMC5883L_SAMPLE_RATE_HZ = 15  # HMC5883L max ~75Hz, 15Hz is good for surface
 MAGNETIC_DECLINATION_DEG = -1.5  # Adjust for your location (degrees)
 

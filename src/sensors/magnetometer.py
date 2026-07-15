@@ -1,6 +1,9 @@
 """
-GY-273 (HMC5883L) Magnetometer reader via I2C.
+QMC5883P Magnetometer reader via I2C.
 Provides magnetic compass heading with declination correction.
+
+Note: Many GY-273 boards labeled "HMC5883L" actually contain a QMC5883P
+chip (I2C addr 0x2C) with a completely different register map.
 """
 
 import asyncio
@@ -17,30 +20,37 @@ from src.utils.logger import setup_logger
 
 log = setup_logger("mag")
 
-# HMC5883L Register Map
-HMC5883L_REG_CFG_A = 0x00    # Configuration Register A
-HMC5883L_REG_CFG_B = 0x01    # Configuration Register B (gain)
-HMC5883L_REG_MODE = 0x02     # Mode Register
-HMC5883L_REG_DATA_X_MSB = 0x03  # Data output X MSB
-HMC5883L_REG_DATA_X_LSB = 0x04
-HMC5883L_REG_DATA_Z_MSB = 0x05  # Note: Z comes before Y on HMC5883L!
-HMC5883L_REG_DATA_Z_LSB = 0x06
-HMC5883L_REG_DATA_Y_MSB = 0x07
-HMC5883L_REG_DATA_Y_LSB = 0x08
-HMC5883L_REG_STATUS = 0x09
-HMC5883L_REG_ID_A = 0x0A     # Identification Register A
+# QMC5883P Register Map
+QMC5883P_REG_CHIP_ID = 0x00      # Chip ID (default: 0x80)
+QMC5883P_REG_DATA_X_LSB = 0x01   # X-axis output data LSB
+QMC5883P_REG_DATA_X_MSB = 0x02   # X-axis output data MSB
+QMC5883P_REG_DATA_Y_LSB = 0x03   # Y-axis output data LSB
+QMC5883P_REG_DATA_Y_MSB = 0x04   # Y-axis output data MSB
+QMC5883P_REG_DATA_Z_LSB = 0x05   # Z-axis output data LSB
+QMC5883P_REG_DATA_Z_MSB = 0x06   # Z-axis output data MSB
+QMC5883P_REG_STATUS = 0x09       # Status register
+QMC5883P_REG_CTRL1 = 0x0A        # Control register 1 (OSR, ODR, Mode)
+QMC5883P_REG_CTRL2 = 0x0B        # Control register 2 (Reset, Range)
 
-# Gain settings (LSB per Gauss)
-GAIN_SCALE = {
-    1370: 0x00,  # ±0.88 Ga
-    1090: 0x20,  # ±1.3 Ga (default)
-    820: 0x40,   # ±1.9 Ga
-    660: 0x60,   # ±2.5 Ga
-    440: 0x80,   # ±4.0 Ga
-    390: 0xA0,   # ±4.7 Ga
-    330: 0xC0,   # ±5.6 Ga
-    230: 0xE0,   # ±8.1 Ga
+# Expected chip ID
+QMC5883P_CHIP_ID = 0x80
+
+# Control Register 1 (0x0A) bit layout:
+#   Bits [1:0] - Mode:  00=Standby, 01=Normal, 10=Single, 11=Continuous
+#   Bits [3:2] - ODR:   00=10Hz, 01=50Hz, 10=100Hz, 11=200Hz
+#   Bits [5:4] - RNG:   00=2G, 01=8G
+#   Bits [7:6] - OSR:   00=512, 01=256, 10=128, 11=64
+ODR_MAP = {
+    10:  0b00,
+    50:  0b01,
+    100: 0b10,
+    200: 0b11,
 }
+
+# Sensitivity (LSB per Gauss) for each range
+# Range ±2G: 12000 LSB/G, Range ±8G: 3000 LSB/G
+RANGE_2G_SCALE = 12000.0
+RANGE_8G_SCALE = 3000.0
 
 
 @dataclass
@@ -55,7 +65,11 @@ class MagData:
 
 
 class HMC5883LReader:
-    """Reader for GY-273 (HMC5883L) magnetometer via I2C."""
+    """Reader for GY-273 magnetometer via I2C.
+
+    Despite the class name (kept for backward-compat with main.py imports),
+    this driver targets the QMC5883P chip found on most modern GY-273 boards.
+    """
 
     def __init__(
         self,
@@ -63,15 +77,13 @@ class HMC5883LReader:
         addr: int = HMC5883L_I2C_ADDR,
         sample_rate_hz: int = HMC5883L_SAMPLE_RATE_HZ,
         declination_deg: float = MAGNETIC_DECLINATION_DEG,
-        gain: int = 1090,
     ):
         self._bus_id = bus
         self._addr = addr
         self._sample_rate = sample_rate_hz
         self._declination_deg = declination_deg
-        self._gain = gain
         self._bus: Optional[SMBus] = None
-        self._gain_scale = 1090.0  # LSB per Gauss
+        self._scale = RANGE_8G_SCALE  # LSB per Gauss (default 8G range)
         self.data = MagData()
         self._running = False
 
@@ -81,54 +93,61 @@ class HMC5883LReader:
         self._offset_z = 0.0
 
     def initialize(self) -> bool:
-        """Initialize HMC5883L. Returns True on success."""
+        """Initialize QMC5883P. Returns True on success."""
         try:
             self._bus = SMBus(self._bus_id)
 
-            # Verify identification registers (should read "H43")
-            id_a = self._bus.read_byte_data(self._addr, HMC5883L_REG_ID_A)
-            if id_a != 0x48:  # 'H'
-                log.warning("HMC5883L ID_A=0x%02X (expected 0x48), may be clone", id_a)
+            # Verify chip ID
+            chip_id = self._bus.read_byte_data(self._addr, QMC5883P_REG_CHIP_ID)
+            if chip_id != QMC5883P_CHIP_ID:
+                log.warning(
+                    "QMC5883P CHIP_ID=0x%02X (expected 0x%02X), may be different variant",
+                    chip_id, QMC5883P_CHIP_ID,
+                )
 
-            # Configuration Register A:
-            # 8 average samples, 15Hz output rate, normal measurement mode
-            # Rate bits: 0b100 = 15Hz
-            rate_bits = self._get_rate_bits(self._sample_rate)
-            cfg_a = 0x60 | (rate_bits << 2)  # 0x60 = 8 samples averaging
-            self._bus.write_byte_data(self._addr, HMC5883L_REG_CFG_A, cfg_a)
+            # Control Register 2 (0x0B): Soft reset, then configure
+            # Bit 7 = SOFT_RST, Bit 3 = SET/RESET enable (required)
+            self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL2, 0x80)  # soft reset
+            time.sleep(0.05)
 
-            # Configuration Register B: Gain = ±1.3 Ga (default, good for most uses)
-            gain_reg = GAIN_SCALE.get(self._gain, 0x20)
-            self._bus.write_byte_data(self._addr, HMC5883L_REG_CFG_B, gain_reg)
-            self._gain_scale = float(self._gain)
+            # Control Register 2: Range = 8G (bit 4 = 1), Set/Reset enabled (bit 3 = 1)
+            # 0x18 = 0001_1000 → RNG=8G, SET_RESET=on
+            self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL2, 0x08)
+            self._scale = RANGE_8G_SCALE
 
-            # Mode Register: Continuous measurement mode
-            self._bus.write_byte_data(self._addr, HMC5883L_REG_MODE, 0x00)
+            # Control Register 1 (0x0A): OSR=512, ODR, Mode=Continuous
+            # Pick closest supported ODR
+            odr_bits = self._get_odr_bits(self._sample_rate)
+            # OSR=512 (bits [7:6] = 00), ODR (bits [3:2]), Mode=Continuous (bits [1:0] = 11)
+            ctrl1 = (0b00 << 6) | (odr_bits << 2) | 0b11
+            self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL1, ctrl1)
 
             time.sleep(0.1)  # Wait for first measurement
             log.info(
-                "HMC5883L initialized: rate=%dHz, gain=%d LSB/Ga, decl=%.1f deg",
-                self._sample_rate, self._gain, self._declination_deg,
+                "QMC5883P initialized: rate=%dHz, range=8G, decl=%.1f° (addr=0x%02X)",
+                self._sample_rate, self._declination_deg, self._addr,
             )
             return True
 
         except Exception as e:
-            log.error("HMC5883L init failed: %s", e)
+            log.error("QMC5883P init failed: %s", e)
+            if self._bus:
+                try:
+                    self._bus.close()
+                except Exception:
+                    pass
+                self._bus = None
             return False
 
-    def _get_rate_bits(self, rate_hz: int) -> int:
-        """Map sample rate to register bits."""
-        rates = {
-            0: 0b000, 1: 0b001, 3: 0b010, 7: 0b011,
-            15: 0b100, 30: 0b101, 75: 0b110,
-        }
-        # Find closest supported rate
-        closest = min(rates.keys(), key=lambda r: abs(r - rate_hz))
-        return rates[closest]
+    def _get_odr_bits(self, rate_hz: int) -> int:
+        """Map sample rate to QMC5883P ODR register bits."""
+        # Find closest supported ODR
+        closest = min(ODR_MAP.keys(), key=lambda r: abs(r - rate_hz))
+        return ODR_MAP[closest]
 
     def calibrate_hard_iron(self, duration_s: float = 10.0):
         """Calibrate hard iron offsets by rotating the sensor.
-        
+
         Rotate the ASV/vehicle in a full circle during calibration.
         Call this when you can physically rotate the vehicle.
         """
@@ -159,11 +178,16 @@ class HMC5883LReader:
     def _read_raw(self):
         """Read raw magnetometer values. Returns (x, y, z) in Gauss."""
         try:
-            # Read 6 bytes: X_MSB, X_LSB, Z_MSB, Z_LSB, Y_MSB, Y_LSB
-            raw = self._bus.read_i2c_block_data(self._addr, HMC5883L_REG_DATA_X_MSB, 6)
-            x = struct.unpack(">h", bytes(raw[0:2]))[0] / self._gain_scale
-            z = struct.unpack(">h", bytes(raw[2:4]))[0] / self._gain_scale
-            y = struct.unpack(">h", bytes(raw[4:6]))[0] / self._gain_scale
+            # Check data ready
+            status = self._bus.read_byte_data(self._addr, QMC5883P_REG_STATUS)
+            if not (status & 0x01):  # DRDY bit
+                return None
+
+            # Read 6 bytes starting at X_LSB: X_LSB, X_MSB, Y_LSB, Y_MSB, Z_LSB, Z_MSB
+            raw = self._bus.read_i2c_block_data(self._addr, QMC5883P_REG_DATA_X_LSB, 6)
+            x = struct.unpack("<h", bytes(raw[0:2]))[0] / self._scale
+            y = struct.unpack("<h", bytes(raw[2:4]))[0] / self._scale
+            z = struct.unpack("<h", bytes(raw[4:6]))[0] / self._scale
             return x, y, z
         except Exception as e:
             log.debug("Mag read error: %s", e)

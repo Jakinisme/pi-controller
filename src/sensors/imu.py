@@ -77,44 +77,59 @@ class MPU6050Reader:
         self._is_calibrated = False
 
     def initialize(self) -> bool:
-        """Initialize MPU6050 registers. Returns True on success."""
-        try:
-            self._bus = SMBus(self._bus_id)
+        """Initialize MPU6050 registers. Returns True on success.
 
-            # Check WHO_AM_I register
-            who = self._bus.read_byte_data(self._addr, MPU6050_REG_WHO_AM_I)
-            if who not in (0x68, 0x98):  # 0x68 for genuine, 0x98 for clones
-                log.error("MPU6050 WHO_AM_I returned 0x%02X, expected 0x68", who)
-                return False
+        Retries up to 3 times with increasing delay to handle transient
+        I2C errors that can occur right after power-up.
+        """
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                if self._bus is None:
+                    self._bus = SMBus(self._bus_id)
 
-            # Wake up (clear sleep bit)
-            self._bus.write_byte_data(self._addr, MPU6050_REG_PWR_MGMT_1, 0x00)
-            time.sleep(0.1)
+                # Check WHO_AM_I register
+                who = self._bus.read_byte_data(self._addr, MPU6050_REG_WHO_AM_I)
+                if who not in (0x68, 0x98):  # 0x68 for genuine, 0x98 for clones
+                    log.error("MPU6050 WHO_AM_I returned 0x%02X, expected 0x68", who)
+                    return False
 
-            # Set sample rate divider: 1kHz / (1 + SMPLRT_DIV)
-            divider = max(0, min(255, int(1000 / self._sample_rate) - 1))
-            self._bus.write_byte_data(self._addr, MPU6050_REG_SMPLRT_DIV, divider)
+                # Wake up (clear sleep bit)
+                self._bus.write_byte_data(self._addr, MPU6050_REG_PWR_MGMT_1, 0x00)
+                time.sleep(0.1)
 
-            # Set DLPF to ~44Hz bandwidth (good noise reduction)
-            self._bus.write_byte_data(self._addr, MPU6050_REG_CONFIG, 0x03)
+                # Set sample rate divider: 1kHz / (1 + SMPLRT_DIV)
+                divider = max(0, min(255, int(1000 / self._sample_rate) - 1))
+                self._bus.write_byte_data(self._addr, MPU6050_REG_SMPLRT_DIV, divider)
 
-            # Set accelerometer range
-            accel_bits = {2: 0x00, 4: 0x08, 8: 0x10, 16: 0x18}[self._accel_range]
-            self._bus.write_byte_data(self._addr, MPU6050_REG_ACCEL_CONFIG, accel_bits)
+                # Set DLPF to ~44Hz bandwidth (good noise reduction)
+                self._bus.write_byte_data(self._addr, MPU6050_REG_CONFIG, 0x03)
 
-            # Set gyroscope range
-            gyro_bits = {250: 0x00, 500: 0x08, 1000: 0x10, 2000: 0x18}[self._gyro_range]
-            self._bus.write_byte_data(self._addr, MPU6050_REG_GYRO_CONFIG, gyro_bits)
+                # Set accelerometer range
+                accel_bits = {2: 0x00, 4: 0x08, 8: 0x10, 16: 0x18}[self._accel_range]
+                self._bus.write_byte_data(self._addr, MPU6050_REG_ACCEL_CONFIG, accel_bits)
 
-            log.info(
-                "MPU6050 initialized: accel=%dg, gyro=%ddeg/s, rate=%dHz",
-                self._accel_range, self._gyro_range, self._sample_rate,
-            )
-            return True
+                # Set gyroscope range
+                gyro_bits = {250: 0x00, 500: 0x08, 1000: 0x10, 2000: 0x18}[self._gyro_range]
+                self._bus.write_byte_data(self._addr, MPU6050_REG_GYRO_CONFIG, gyro_bits)
 
-        except Exception as e:
-            log.error("MPU6050 init failed: %s", e)
-            return False
+                log.info(
+                    "MPU6050 initialized: accel=%dg, gyro=%ddeg/s, rate=%dHz",
+                    self._accel_range, self._gyro_range, self._sample_rate,
+                )
+                return True
+
+            except Exception as e:
+                if attempt < max_retries:
+                    delay = 0.2 * attempt  # 0.2s, 0.4s
+                    log.warning(
+                        "MPU6050 init attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt, max_retries, e, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    log.error("MPU6050 init failed after %d attempts: %s", max_retries, e)
+                    return False
 
     def calibrate_gyro(self, samples: int = 200):
         """Calibrate gyroscope offsets. Keep the IMU still during calibration."""

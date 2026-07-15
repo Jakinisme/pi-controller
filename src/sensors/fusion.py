@@ -52,6 +52,8 @@ class SensorFusion:
 
     # Minimum GPS speed (m/s) to trust GPS heading
     GPS_HEADING_MIN_SPEED = 0.3
+    # Rate-limit interval for gyro-only heading warning (seconds)
+    _GYRO_ONLY_WARN_INTERVAL = 30.0
 
     def __init__(
         self,
@@ -76,6 +78,7 @@ class SensorFusion:
         self._last_update_time = 0.0
         self._gyro_heading = 0.0  # Integrated gyro heading
         self._last_gps_timestamp = 0.0  # Track last GPS update time
+        self._last_gyro_warn_time = 0.0  # Rate-limit gyro-only warnings
 
     @staticmethod
     def _blend_angle(base: float, target: float, weight: float) -> float:
@@ -126,7 +129,10 @@ class SensorFusion:
             gyro_delta = self.imu.data.gyro_z * dt
             self._gyro_heading = (self._gyro_heading + gyro_delta) % 360
             self.state.heading = self._gyro_heading
-            log.warning("Heading from gyro only - will drift!")
+            now_mono = time.monotonic()
+            if now_mono - self._last_gyro_warn_time >= self._GYRO_ONLY_WARN_INTERVAL:
+                log.warning("Heading from gyro only - will drift!")
+                self._last_gyro_warn_time = now_mono
 
         # --- Position fusion ---
         if gps_ok and self.gps.data.timestamp != self._last_gps_timestamp:
