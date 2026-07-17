@@ -10,15 +10,20 @@ import asyncio
 import time
 import math
 import struct
+import json
+import os
 from dataclasses import dataclass
 from typing import Optional
 
 from smbus2 import SMBus
 
-from src.config import HMC5883L_I2C_BUS, HMC5883L_I2C_ADDR, HMC5883L_SAMPLE_RATE_HZ, MAGNETIC_DECLINATION_DEG
+from src.config import HMC5883L_I2C_BUS, HMC5883L_I2C_ADDR, HMC5883L_SAMPLE_RATE_HZ, MAGNETIC_DECLINATION_DEG, BASE_DIR
 from src.utils.logger import setup_logger
 
 log = setup_logger("mag")
+
+# Path to saved hard-iron calibration offsets (written by calibrate_mag.py)
+CALIBRATION_FILE = str(BASE_DIR / "mag_calibration.json")
 
 # QMC5883P Register Map
 QMC5883P_REG_CHIP_ID = 0x00      # Chip ID (default: 0x80)
@@ -123,6 +128,10 @@ class HMC5883LReader:
             self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL1, ctrl1)
 
             time.sleep(0.1)  # Wait for first measurement
+
+            # Auto-load saved hard-iron calibration
+            self._load_calibration()
+
             log.info(
                 "QMC5883P initialized: rate=%dHz, range=8G, decl=%.1f° (addr=0x%02X)",
                 self._sample_rate, self._declination_deg, self._addr,
@@ -138,6 +147,29 @@ class HMC5883LReader:
                     pass
                 self._bus = None
             return False
+
+    def _load_calibration(self):
+        """Load hard-iron calibration offsets from file (written by calibrate_mag.py)."""
+        try:
+            if os.path.exists(CALIBRATION_FILE):
+                with open(CALIBRATION_FILE, "r") as f:
+                    cal = json.load(f)
+                self._offset_x = cal.get("offset_x", 0.0)
+                self._offset_y = cal.get("offset_y", 0.0)
+                self._offset_z = cal.get("offset_z", 0.0)
+                log.info(
+                    "Loaded mag calibration: offset=(%.4f, %.4f, %.4f) from %s",
+                    self._offset_x, self._offset_y, self._offset_z,
+                    cal.get("timestamp", "unknown"),
+                )
+            else:
+                log.warning(
+                    "No mag calibration file found at %s — heading may be inaccurate! "
+                    "Run: python calibrate_mag.py",
+                    CALIBRATION_FILE,
+                )
+        except Exception as e:
+            log.error("Failed to load mag calibration: %s", e)
 
     def _get_odr_bits(self, rate_hz: int) -> int:
         """Map sample rate to QMC5883P ODR register bits."""
