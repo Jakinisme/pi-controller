@@ -86,7 +86,7 @@ ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe if no msg for 1s
 # ---------------------------------------------------------------------------
 FIREBASE_ENABLED = True  # Set True and provide credentials
 FIREBASE_CREDENTIALS_PATH = str(BASE_DIR / "firebase-credentials.json")
-FIREBASE_DATABASE_URL = "https://your-project.firebaseio.com"
+FIREBASE_DATABASE_URL = "https://autonomous-buoy-default-rtdb.asia-southeast1.firebasedatabase.app"
 FIREBASE_LOG_RATE_HZ = 2          # Push telemetry at 2Hz
 FIREBASE_VEHICLE_ID = "asv-001"   # Unique ID for this vehicle
 
