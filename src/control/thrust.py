@@ -153,8 +153,8 @@ class ThrustComputer:
             (surge, sway, yaw)
         """
         # Position PID on NED error
-        north_cmd = self.pid_north.compute(0.0, -nav.desired_north_m)  # error = setpoint - measurement
-        east_cmd = self.pid_east.compute(0.0, -nav.desired_east_m)
+        north_cmd = self.pid_north.compute(0.0, nav.desired_north_m)  # error = setpoint - measurement
+        east_cmd = self.pid_east.compute(0.0, nav.desired_east_m)
 
         # Rotate NED commands to body frame using current heading
         heading_rad = math.radians(state.heading)
