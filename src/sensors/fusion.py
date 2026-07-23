@@ -77,6 +77,7 @@ class SensorFusion:
         self._running = False
         self._last_update_time = 0.0
         self._gyro_heading = 0.0  # Integrated gyro heading
+        self._heading_initialized = False  # Snap to first valid mag reading
         self._last_gps_timestamp = 0.0  # Track last GPS update time
         self._last_gyro_warn_time = 0.0  # Rate-limit gyro-only warnings
 
@@ -99,6 +100,16 @@ class SensorFusion:
         imu_ok = self.imu.data.valid
         mag_ok = self.mag.data.valid
         gps_ok = self.gps.has_fix and not self.gps.is_stale
+
+        # Snap heading to the first valid magnetometer reading — avoids a
+        # slow multi-second convergence transient from a fake 0.0° start,
+        # which previously made the vehicle look like it was rotating when
+        # it was actually just catching up to the real compass heading.
+        if not self._heading_initialized and mag_ok:
+            self._gyro_heading = self.mag.data.heading
+            self.state.heading = self.mag.data.heading
+            self._heading_initialized = True
+            log.info("Heading initialized to magnetometer: %.1f°", self.mag.data.heading)
 
         if mag_ok and imu_ok:
             # Gyro integration: heading += yaw_rate * dt
