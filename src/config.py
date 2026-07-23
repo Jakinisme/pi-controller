@@ -28,6 +28,7 @@ HMC5883L_I2C_BUS = 1
 HMC5883L_I2C_ADDR = 0x2C
 HMC5883L_SAMPLE_RATE_HZ = 15  # HMC5883L max ~75Hz, 15Hz is good for surface
 MAGNETIC_DECLINATION_DEG = -1.5  # Adjust for your location (degrees)
+HEADING_MOUNT_OFFSET_DEG = 180.0  # Sensor mounted 180° from bow — N↔S swap fix
 
 # ---------------------------------------------------------------------------
 # Sensor Fusion

@@ -17,7 +17,7 @@ from typing import Optional
 
 from smbus2 import SMBus
 
-from src.config import HMC5883L_I2C_BUS, HMC5883L_I2C_ADDR, HMC5883L_SAMPLE_RATE_HZ, MAGNETIC_DECLINATION_DEG, BASE_DIR
+from src.config import HMC5883L_I2C_BUS, HMC5883L_I2C_ADDR, HMC5883L_SAMPLE_RATE_HZ, MAGNETIC_DECLINATION_DEG, HEADING_MOUNT_OFFSET_DEG, BASE_DIR
 from src.utils.logger import setup_logger
 
 log = setup_logger("mag")
@@ -246,8 +246,9 @@ class HMC5883LReader:
         heading_rad = math.atan2(y, x)
         heading_deg = math.degrees(heading_rad)
 
-        # Apply magnetic declination
+        # Apply magnetic declination + mounting offset
         heading_deg += self._declination_deg
+        heading_deg += HEADING_MOUNT_OFFSET_DEG
 
         # Normalize to [0, 360)
         heading_deg = heading_deg % 360
