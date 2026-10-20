@@ -57,6 +57,11 @@ ODR_MAP = {
 RANGE_2G_SCALE = 12000.0
 RANGE_8G_SCALE = 3000.0
 
+# Reconnect back-off when the magnetometer isn't present at boot
+_INIT_RETRY_S = 5.0
+# A read older than this is treated as stale (sensor stopped updating)
+_STALE_AFTER_S = 1.0
+
 
 @dataclass
 class MagData:
@@ -117,7 +122,7 @@ class HMC5883LReader:
 
             # Control Register 2: Range = 8G (bit 4 = 1), Set/Reset enabled (bit 3 = 1)
             # 0x18 = 0001_1000 → RNG=8G, SET_RESET=on
-            self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL2, 0x08)
+            self._bus.write_byte_data(self._addr, QMC5883P_REG_CTRL2, 0x18)
             self._scale = RANGE_8G_SCALE
 
             # Control Register 1 (0x0A): OSR=512, ODR, Mode=Continuous
@@ -258,14 +263,29 @@ class HMC5883LReader:
         self.data.valid = True
         return True
 
+    @property
+    def data_age(self) -> float:
+        """Seconds since the last successful read."""
+        if self.data.timestamp == 0:
+            return float("inf")
+        return time.time() - self.data.timestamp
+
+    @property
+    def is_stale(self) -> bool:
+        return self.data_age > _STALE_AFTER_S
+
     async def read_loop(self):
         """Async read loop at configured sample rate."""
-        if not self._bus:
-            if not self.initialize():
-                log.error("Mag read_loop aborted: init failed")
-                return
-
         self._running = True
+
+        while self._running and not self._bus:
+            if self.initialize():
+                break
+            log.warning("Mag init failed — retrying in %.0fs", _INIT_RETRY_S)
+            await asyncio.sleep(_INIT_RETRY_S)
+        if not self._running:
+            return
+
         interval = 1.0 / self._sample_rate
 
         log.info("Magnetometer read_loop started at %dHz", self._sample_rate)

@@ -124,15 +124,21 @@ class WaypointNavigator:
             lat: Current latitude (degrees).
             lon: Current longitude (degrees).
             heading: Current fused heading (degrees).
-            gps_valid: True if the GPS has a valid fix.  When False the
-                navigator keeps the last output without recomputing.
+            gps_valid: True if the GPS has a valid fix.  When False,
+                autonomous modes emit IDLE (zero thrust) and manual mode
+                still passes the joystick command through.
         
         Returns:
             NavigationOutput with desired speed/heading or position errors.
         """
         if not gps_valid:
-            # No GPS fix — hold last output, don't navigate blind
-            log.debug("GPS invalid, skipping nav update")
+            # No GPS fix — don't navigate blind. Zero thrust in autonomous
+            # modes so the boat drifts instead of driving on a stale vector.
+            # Manual mode still works (joystick needs no GPS).
+            if self.state == NavigationState.MANUAL:
+                self.output = NavigationOutput(mode=NavigationState.MANUAL)
+            elif self.state in (NavigationState.WAYPOINT_NAV, NavigationState.STATION_KEEP):
+                self.output = NavigationOutput(mode=NavigationState.IDLE)
             return self.output
 
         self._last_lat = lat
@@ -143,6 +149,11 @@ class WaypointNavigator:
 
         elif self.state == NavigationState.STATION_KEEP:
             self._update_station_keeping(lat, lon, heading)
+
+        elif self.state == NavigationState.MANUAL:
+            # Emit MANUAL so ThrustComputer returns the joystick command
+            # set via set_manual_thrust() instead of recomputing PID.
+            self.output = NavigationOutput(mode=NavigationState.MANUAL)
 
         elif self.state == NavigationState.IDLE:
             self.output = NavigationOutput(mode=NavigationState.IDLE)

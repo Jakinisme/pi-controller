@@ -5,6 +5,7 @@ Provides consistent logging across all modules.
 
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 from src.config import LOG_LEVEL, LOG_FILE, LOG_TO_FILE, LOG_TO_CONSOLE
 
 
@@ -38,7 +39,9 @@ def setup_logger(name: str = "asv") -> logging.Logger:
         log_dir = os.path.dirname(LOG_FILE)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
-        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=5_000_000, backupCount=3
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 

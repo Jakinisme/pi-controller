@@ -33,6 +33,11 @@ MPU6050_REG_WHO_AM_I = 0x75
 ACCEL_SCALE = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}  # LSB/g
 GYRO_SCALE = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}  # LSB/(deg/s)
 
+# Reconnect back-off when the IMU isn't present at boot
+_INIT_RETRY_S = 5.0
+# A read older than this is treated as stale (sensor stopped updating)
+_STALE_AFTER_S = 0.5
+
 
 @dataclass
 class IMUData:
@@ -92,6 +97,7 @@ class MPU6050Reader:
                 who = self._bus.read_byte_data(self._addr, MPU6050_REG_WHO_AM_I)
                 if who not in (0x68, 0x98):  # 0x68 for genuine, 0x98 for clones
                     log.error("MPU6050 WHO_AM_I returned 0x%02X, expected 0x68", who)
+                    self.close()
                     return False
 
                 # Wake up (clear sleep bit)
@@ -220,16 +226,31 @@ class MPU6050Reader:
         self.data.valid = True
         return True
 
+    @property
+    def data_age(self) -> float:
+        """Seconds since the last successful read."""
+        if self.data.timestamp == 0:
+            return float("inf")
+        return time.time() - self.data.timestamp
+
+    @property
+    def is_stale(self) -> bool:
+        return self.data_age > _STALE_AFTER_S
+
     async def read_loop(self):
         """Async read loop at configured sample rate. Run as asyncio task."""
-        if not self._bus:
-            if not self.initialize():
-                log.error("IMU read_loop aborted: init failed")
-                return
+        self._running = True
+
+        while self._running and not self._bus:
+            if self.initialize():
+                break
+            log.warning("IMU init failed — retrying in %.0fs", _INIT_RETRY_S)
+            await asyncio.sleep(_INIT_RETRY_S)
+        if not self._running:
+            return
 
         if not self._is_calibrated:
             self.calibrate_gyro()
-        self._running = True
         interval = 1.0 / self._sample_rate
 
         log.info("IMU read_loop started at %dHz", self._sample_rate)

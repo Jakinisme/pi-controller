@@ -97,8 +97,8 @@ class SensorFusion:
         dt = min(dt, 0.5)  # Clamp dt to avoid huge jumps
 
         # --- Heading fusion ---
-        imu_ok = self.imu.data.valid
-        mag_ok = self.mag.data.valid
+        imu_ok = self.imu.data.valid and not self.imu.is_stale
+        mag_ok = self.mag.data.valid and not self.mag.is_stale
         gps_ok = self.gps.has_fix and not self.gps.is_stale
 
         # Snap heading to the first valid magnetometer reading — avoids a

@@ -58,7 +58,7 @@ def init_sensor(bus: SMBus, addr: int):
     time.sleep(0.05)
 
     # Range = 8G, Set/Reset enable
-    bus.write_byte_data(addr, REG_CTRL2, 0x08)
+    bus.write_byte_data(addr, REG_CTRL2, 0x18)
 
     # OSR=512, ODR=50Hz, Mode=Continuous
     ctrl1 = (0b00 << 6) | (0b01 << 2) | 0b11

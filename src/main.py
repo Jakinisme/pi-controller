@@ -29,9 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (
     FUSION_UPDATE_RATE_HZ,
-    ML_ANOMALY_ENABLED,
-    ML_PREDICTION_ENABLED,
-    ML_INFERENCE_RATE_HZ,
     FIREBASE_VEHICLE_ID,
 )
 from src.sensors.gps import GPSReader
@@ -46,6 +43,8 @@ from src.comms.firebase_bridge import FirebaseBridge, RemoteCommand
 # from src.ml.anomaly import AnomalyDetector
 # from src.ml.prediction import DriftPredictor
 from src.utils.logger import setup_logger
+from src.ml.integration import MLFanout
+from src.ml import config_ml as cfg_ml
 
 log = setup_logger("main")
 
@@ -86,6 +85,10 @@ class ASVSystem:
         self.anomaly_detector = None
         self.drift_predictor = None
 
+        # ML fan-out layer (shadow mode, scoring OFF). Aditif — tidak
+        # kirim perintah motor. Lihat src/ml/SENSOR_CONTRACT.md.
+        self.ml_fanout = None
+
         # Control loop rate
         self._control_rate_hz = FUSION_UPDATE_RATE_HZ
         self._running = False
@@ -106,6 +109,9 @@ class ASVSystem:
 
         elif cmd.mode == "station_keep":
             state = self.fusion.get_state()
+            if not state.gps_valid:
+                log.warning("Station-keep rejected: no GPS fix")
+                return
             hold_heading = cmd.heading if cmd.heading is not None else state.heading
             self.navigator.start_station_keeping(
                 state.latitude, state.longitude, hold_heading
@@ -114,9 +120,19 @@ class ASVSystem:
         elif cmd.mode == "waypoint":
             wp_list = []
             for wp_data in cmd.waypoints:
+                try:
+                    lat = float(str(wp_data.get("lat")))
+                    lon = float(str(wp_data.get("lon")))
+                except (TypeError, ValueError):
+                    log.warning("Waypoint rejected: non-numeric lat/lon in %s", wp_data)
+                    return
+                if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0) \
+                        or (lat == 0.0 and lon == 0.0):
+                    log.warning("Waypoint rejected: out-of-range (%s, %s)", lat, lon)
+                    return
                 wp_list.append(Waypoint(
-                    latitude=float(wp_data.get("lat", 0)),
-                    longitude=float(wp_data.get("lon", 0)),
+                    latitude=lat,
+                    longitude=lon,
                     name=str(wp_data.get("name", "")),
                     heading_hold=wp_data.get("heading_hold"),
                 ))
@@ -184,6 +200,7 @@ class ASVSystem:
                     self.navigator.state.name,
                     self.navigator.current_wp_index,
                     len(self.navigator.waypoints),
+                    distance_to_wp=self.navigator.distance_to_waypoint,
                 )
 
                 # --- Periodic status log (every 5s) ---
@@ -213,62 +230,15 @@ class ASVSystem:
                 await asyncio.sleep(sleep_time)
 
     # ------------------------------------------------------------------
-    # ML LOOP  (~1Hz)
+    # ML LOOP  (fan-out + aggregate per AGG_INTERVAL)
     # ------------------------------------------------------------------
     async def ml_loop(self):
-        """ML inference loop (~1Hz, non-blocking). Currently disabled."""
-        log.info("ML disabled (modules not available)")
-        return
-
-        interval = 1.0 / ML_INFERENCE_RATE_HZ
-        log.info("ML loop started at %dHz", ML_INFERENCE_RATE_HZ)
-
-        while self._running:
-            t0 = time.monotonic()
-
-            try:
-                state = self.fusion.get_state()
-                cmd = self.thrust.command
-
-                if ML_ANOMALY_ENABLED:
-                    result = self.anomaly_detector.detect(
-                        gps_speed=state.speed,
-                        lat=state.latitude,
-                        lon=state.longitude,
-                        gyro_z=state.yaw_rate,
-                        accel_x=self.imu.data.accel_x,
-                        accel_y=self.imu.data.accel_y,
-                        accel_z=self.imu.data.accel_z,
-                        mag_heading=self.mag.data.heading,
-                    )
-                    self.firebase.push_anomaly(
-                        result.gps_anomaly,
-                        result.imu_anomaly,
-                        result.mag_anomaly,
-                        score=result.anomaly_score,
-                    )
-
-                    # Auto-fit model when enough data collected
-                    if (not self.anomaly_detector._is_fitted
-                            and len(self.anomaly_detector._history) >= 200):
-                        self.anomaly_detector.fit()
-
-                if ML_PREDICTION_ENABLED:
-                    self.drift_predictor.predict(
-                        heading=state.heading,
-                        speed=state.speed,
-                        surge=cmd.surge,
-                        sway=cmd.sway,
-                        yaw=cmd.yaw,
-                    )
-
-            except Exception as e:
-                log.error("ML loop error: %s", e)
-
-            elapsed = time.monotonic() - t0
-            sleep_time = max(0, interval - elapsed)
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
+        """ML shadow layer: fan-out IMU/GPS read-only, aggregate per
+        AGG_INTERVAL, log + push telemetry/ml. Scoring OFF (aturan 6.6).
+        Tidak kirim perintah motor."""
+        self.ml_fanout = MLFanout(self.imu, self.gps, self.firebase)
+        log.info("ML fan-out started (shadow, scoring=OFF)")
+        await self.ml_fanout.ml_loop()
 
     # ------------------------------------------------------------------
     # RUN
@@ -312,11 +282,26 @@ class ASVSystem:
         log.info("All subsystems started (%d tasks)", len(tasks))
 
         try:
-            await asyncio.gather(*tasks)
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_EXCEPTION
+            )
+            for task in done:
+                if task.cancelled():
+                    continue
+                exc = task.exception()
+                if exc is not None:
+                    log.error(
+                        "Task %s crashed: %r — shutting down",
+                        task.get_name(), exc,
+                    )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         except asyncio.CancelledError:
             log.info("Tasks cancelled")
-        except Exception as e:
-            log.error("Unexpected error in main: %s", e)
+        finally:
+            # Always run cleanup: zero thrust, close serial/GPIO, stop loops.
+            await self.shutdown()
 
     # ------------------------------------------------------------------
     # SHUTDOWN
@@ -333,6 +318,8 @@ class ASVSystem:
         self.fusion.stop()
         self.esp32.stop()
         self.firebase.stop()
+        if self.ml_fanout:
+            self.ml_fanout.stop()
 
         # Close hardware
         self.gps.close()

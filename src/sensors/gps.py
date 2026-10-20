@@ -23,6 +23,9 @@ log = setup_logger("gps")
 # Maximum buffer size before forced clear (prevents memory leak on noise/bad wiring)
 _MAX_BUFFER_BYTES = 2048
 
+# Reconnect back-off when pigpiod/GPS isn't available at boot
+_RECONNECT_S = 5.0
+
 
 @dataclass
 class GPSData:
@@ -92,13 +95,18 @@ class GPSReader:
     async def read_loop(self):
         """Continuously read and parse NMEA sentences. Run as asyncio task."""
         self._running = True
-        if not self._bb_open:
-            if not self.open():
-                log.error("GPS read_loop aborted: bit-bang not open")
-                return
-
         log.info("GPS read_loop started")
+
         while self._running:
+            if not self.is_connected:
+                self.close()
+                if not self.open():
+                    log.warning(
+                        "GPS open failed — retrying in %.0fs", _RECONNECT_S
+                    )
+                    await asyncio.sleep(_RECONNECT_S)
+                    continue
+
             try:
                 # Poll bit-bang buffer every 50ms
                 count, data = self._pi.bb_serial_read(self._gpio)
@@ -123,6 +131,7 @@ class GPSReader:
 
             except Exception as e:
                 log.error("GPS read error: %s", e)
+                self.close()  # force reopen on next iteration
 
             await asyncio.sleep(0.05)
 

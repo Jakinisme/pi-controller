@@ -20,7 +20,6 @@ from src.config import (
     ESP32_SERIAL_PORT,
     ESP32_BAUD_RATE,
     ESP32_HEARTBEAT_INTERVAL_S,
-    ESP32_TIMEOUT_S,
 )
 from src.utils.logger import setup_logger
 
@@ -128,15 +127,21 @@ class ESP32Link:
             return False
 
     def _read_response(self):
-        """Read any response from ESP32 (non-blocking)."""
-        if not self._serial or not self._serial.in_waiting:
+        """Read all available responses from ESP32 (non-blocking).
+
+        Drains the full RX buffer each call so the ESP32's TX buffer never
+        fills and blocks its main loop (status is sent at 10 Hz).
+        """
+        ser = self._serial
+        if not ser:
             return
-        try:
-            line = self._serial.readline().decode("ascii", errors="ignore").strip()
-            if line.startswith("{"):
-                self.esp32_status = json.loads(line)
-        except Exception:
-            pass
+        while ser.in_waiting:
+            try:
+                line = ser.readline().decode("ascii", errors="ignore").strip()
+                if line.startswith("{"):
+                    self.esp32_status = json.loads(line)
+            except Exception:
+                break
 
     async def heartbeat_loop(self):
         """Send periodic heartbeat even when no thrust commands are active.

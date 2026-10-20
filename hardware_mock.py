@@ -140,10 +140,19 @@ class _smbus2:
 # ─────────────────────────────────────────────────────
 # serial mock (GPS UART)
 # ─────────────────────────────────────────────────────
+class _SerialException(Exception):
+    pass
+
+
+class _SerialTimeoutException(Exception):
+    pass
+
+
 class _Serial:
     def __init__(self, *a, **kw):
         self.is_open = True
         self._buf = []
+        self.in_waiting = 0
 
     def readline(self):
         # Return fake NMEA GPGGA sentence
@@ -170,6 +179,8 @@ class _Serial:
 
 class _pyserial:
     Serial = _Serial
+    SerialException = _SerialException
+    SerialTimeoutException = _SerialTimeoutException
 
 
 # ─────────────────────────────────────────────────────

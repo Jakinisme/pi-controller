@@ -25,6 +25,7 @@ DATA FLOW:
 
 import asyncio
 import json
+import threading
 import time
 from typing import Optional, Callable, Awaitable, Any, Dict, List
 from dataclasses import dataclass, field
@@ -103,10 +104,11 @@ class FirebaseBridge:
         self._running = False
         self._ref = None              # Root ref: /vehicles/{id}
         self._last_telemetry_time = 0.0
-        self._last_command_ts = 0.0   # Deduplicate repeated commands
+        self._last_command_ts = time.time()   # Ignore commands older than boot
 
         # Pending telemetry buffer (queued between send cycles)
         self._telemetry: Dict[str, Any] = {}
+        self._telemetry_lock = threading.Lock()
 
         # Command handler callback (set by main.py)
         self._command_handler: Optional[Callable[[RemoteCommand], Awaitable[None]]] = None
@@ -145,7 +147,8 @@ class FirebaseBridge:
     # ------------------------------------------------------------------
     def queue_telemetry(self, path: str, data: dict):
         """Queue telemetry data to be sent on the next push cycle."""
-        self._telemetry[path] = data
+        with self._telemetry_lock:
+            self._telemetry[path] = data
 
     def push_position(self, lat: float, lon: float, heading: float, speed: float, altitude: float = 0.0):
         self.queue_telemetry("telemetry/position", {
@@ -184,26 +187,38 @@ class FirebaseBridge:
             "gps": gps, "imu": imu, "mag": mag, "score": round(score, 4),
         })
 
+    def push_ml(self, payload: dict):
+        """Queue ML layer telemetry (node telemetry/ml). Aditif — tidak ubah
+        perilaku push lain. Dikirim per AGG_INTERVAL (harian), bukan per sampel.
+        Lihat src/ml/SENSOR_CONTRACT.md untuk skema node."""
+        self.queue_telemetry("telemetry/ml", payload)
+
     def _send_telemetry(self):
-        """Batch-send all queued telemetry to Firebase."""
+        """Batch-send all queued telemetry to Firebase.
+
+        Swaps the buffer under a lock so the control-loop thread can keep
+        queueing while this runs in the executor (no dict-mutation race).
+        """
         if not self._enabled or self._ref is None:
-            return
-        if not self._telemetry:
             return
 
         now = time.time()
         if (now - self._last_telemetry_time) < (1.0 / self._log_rate):
             return
 
+        with self._telemetry_lock:
+            if not self._telemetry:
+                return
+            pending, self._telemetry = self._telemetry, {}
+
         try:
             update = {}
-            for path, data in self._telemetry.items():
+            for path, data in pending.items():
                 for key, value in data.items():
                     update[f"{path}/{key}"] = value
             update["telemetry/timestamp"] = now
 
             self._ref.update(update)
-            self._telemetry.clear()
             self._last_telemetry_time = now
         except Exception as e:
             log.error("Firebase telemetry push failed: %s", e)
@@ -235,14 +250,24 @@ class FirebaseBridge:
                 cmd.manual_surge, cmd.manual_sway, cmd.manual_yaw,
             )
 
-            # Acknowledge by writing back
-            cmd_ref.update({"ack": time.time(), "ack_mode": cmd.mode})
-
-            return cmd  # Will be dispatched in the async loop
+            return cmd  # Dispatched in the async loop; ack written after it runs
 
         except Exception as e:
             log.error("Firebase command listen error: %s", e)
+            time.sleep(2.0)  # Back off so a Firebase outage isn't hammered
             return None
+
+    def _ack_command(self, cmd: RemoteCommand, error: Optional[str] = None):
+        """Write ack (or ack_error) only after the handler has actually run."""
+        if not self._enabled or self._ref is None:
+            return
+        try:
+            payload = {"ack": time.time(), "ack_mode": cmd.mode}
+            if error:
+                payload["ack_error"] = error[:200]
+            self._ref.child("commands").update(payload)
+        except Exception as e:
+            log.error("Firebase ack write failed: %s", e)
 
     # ------------------------------------------------------------------
     # ASYNC LOOPS
@@ -262,7 +287,7 @@ class FirebaseBridge:
         """Async loop: polls Firebase for new commands and dispatches handler."""
         if not self._running:
             self._running = True
-        poll_interval = 0.1  # Check every 500ms
+        poll_interval = 0.5  # Check every 500ms
         log.info("Firebase command listener started (poll %.1fs)", poll_interval)
 
         while self._running:
@@ -270,10 +295,16 @@ class FirebaseBridge:
                 None, self._listen_for_commands
             )
             if cmd is not None and self._command_handler is not None:
+                loop = asyncio.get_running_loop()
                 try:
                     await self._command_handler(cmd)
                 except Exception as e:
                     log.error("Command handler error: %s", e)
+                    await loop.run_in_executor(
+                        None, self._ack_command, cmd, str(e)
+                    )
+                else:
+                    await loop.run_in_executor(None, self._ack_command, cmd)
 
             await asyncio.sleep(poll_interval)
 

@@ -1,0 +1,48 @@
+{
+  "sklearn_version": "1.9.0",
+  "numpy_version": "2.5.1",
+  "feature_list": [
+    "sea_level_deseasonalized",
+    "sea_level_delta",
+    "sea_level_rate",
+    "sea_level_ma",
+    "sea_level_std",
+    "wave_height_deseasonalized",
+    "wave_height_delta",
+    "wave_height_rate",
+    "wave_height_ma",
+    "wave_height_std",
+    "wave_direction_sin",
+    "wave_direction_cos",
+    "wave_period",
+    "wind_speed",
+    "wind_speed_deseasonalized",
+    "wind_speed_ma",
+    "wind_speed_std",
+    "wind_direction_sin",
+    "wind_direction_cos",
+    "rain_rate",
+    "rain_rate_ma",
+    "rain_acc_3d",
+    "current_speed",
+    "current_speed_ma",
+    "imu_accel_rms",
+    "imu_slope_rms",
+    "imu_roll_rms",
+    "imu_pitch_rms",
+    "imu_dominant_freq",
+    "gps_drift_speed",
+    "gps_drift_distance"
+  ],
+  "n_estimators": 250,
+  "contamination": 0.02,
+  "random_state": 42,
+  "train_range": [
+    "2015-01-12",
+    "2023-12-31"
+  ],
+  "test_range": [
+    "2024-01-01",
+    "2026-05-03"
+  ]
+}

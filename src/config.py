@@ -80,7 +80,7 @@ THRUST_DEADZONE = 0.05  # below this value, motor won't spin
 ESP32_SERIAL_PORT = "/dev/serial0"  # hardware UART to ESP32 (was /dev/ttyUSB0)
 ESP32_BAUD_RATE = 115200
 ESP32_HEARTBEAT_INTERVAL_S = 0.5    # Send heartbeat every 500ms
-ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe if no msg for 1s
+ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe: no msg for 1s -> shutdown motor
 
 # ---------------------------------------------------------------------------
 # Firebase Configuration
@@ -102,8 +102,8 @@ WEB_DASHBOARD_PORT = 8080               # Port for the web dashboard server
 # ---------------------------------------------------------------------------
 # ML Inference
 # ---------------------------------------------------------------------------
-ML_ANOMALY_ENABLED = True
-ML_PREDICTION_ENABLED = True
+ML_ANOMALY_ENABLED = False
+ML_PREDICTION_ENABLED = False
 ML_INFERENCE_RATE_HZ = 1          # Run ML models at 1Hz
 ML_ANOMALY_HISTORY_SIZE = 500     # Number of samples for Isolation Forest
 ML_MODEL_PATH = str(BASE_DIR / "models")
