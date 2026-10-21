@@ -47,7 +47,10 @@ P_ATM = 101325.0               # Pa rujukan
 # ── storm context (verifikasi ke BMKG!) ───────────────
 # WIND_STORM_THRESHOLD: Beaufort 8 (Gale) = 17.2 m/s (WMO). Laut Jawa
 #   mungkin perlu lebih rendah — cek kategori BMKG perairan Indonesia.
-WIND_STORM_THRESHOLD = 17.2    # m/s
+# WIND_STORM_THRESHOLD: Beaufort 6 (10.8-13.8 m/s). Angin nyata Laut Jawa max
+# ~9.5 m/s -> Beaufort 8 (17.2) tidak pernah trigger. 10.8 = batas bawah Bft 6.
+# HARUS sama dengan config_v2.py (machine-learning) supaya train/serve konsisten.
+WIND_STORM_THRESHOLD = 10.8    # m/s (Beaufort 6)
 # RAIN_HEAVY_THRESHOLD: BMKG "hujan sangat lebat" >100 mm/hari ~= 4.2 mm/h.
 RAIN_HEAVY_THRESHOLD = 5.0     # mm/h mean over AGG_INTERVAL
 
@@ -62,10 +65,10 @@ IMU_MAX_GAP_S = 2.0            # gap terbesar yang masih ditoleransi
 GPS_MIN_HDOP = 5.0             # di atas ini -> low_confidence (tidak ada HDOP dari NEO-6M GGA? ada, field hdop)
 GPS_DRIFT_MIN_M = 2.0          # noise GPS beberapa meter -> ambang minimum
 
-# ── pressure HX710B (TODO verifikasi fisik) ───────────
-# Pin DOUT/SCK: TODO — belum ada hardware wiring. Stub sampai diverifikasi.
-HX710B_DOUT_GPIO = None        # TODO set setelah wiring diverifikasi
-HX710B_SCK_GPIO = None
+# ── pressure HX710B (pin FINAL — pilih aman, hindari I2C/UART/GPS/SPI/EEPROM) ──
+# GPIO 5 (pin 29) & GPIO 6 (pin 31): bebas, tidak ada fungsi alt default.
+HX710B_DOUT_GPIO = 5           # pin fisik 29
+HX710B_SCK_GPIO = 6            # pin fisik 31
 HX710B_SAMPLE_RATE_HZ = 1.0    # mode 10Hz/40Hz? TODO datasheet
 # Kalibrasi: offset nol (selang belum tercelup) + scale (counts->kPa).
 # TODO 2-titik kalibrasi fisik.
@@ -78,7 +81,7 @@ HX710B_MAX_HEAD_M = 4.0
 
 # ── anemometer (ref: flood-sensor/src/anemometer.cpp) ─
 # Pulsa reed/Hall RISING. Kalibrasi porting dari ESP32 (TODO verifikasi fisik).
-ANEMOMETER_GPIO = None         # TODO pin Pi (bukan GPIO19 ESP32)
+ANEMOMETER_GPIO = 17           # pin fisik 11 (GPIO bebas, aman)
 ANEMOMETER_DEBOUNCE_US = 5000  # 5ms (dari ref)
 ANEMOMETER_WINDOW_S = 10.0     # RPS = count/window (dari ref: 10s)
 # m/s = -0.0181*RPS^2 + 1.3859*RPS + 1.4055 (dari ref)
@@ -89,7 +92,7 @@ ANEMOMETER_DEADBAND_MS = 1.5    # <=1.5 m/s -> 0 (dari ref)
 ANEMOMETER_LEVEL_SHIFTER_TODO = True   # TODO: sensor 5V? Pi 3.3V — verifikasi
 
 # ── tipping bucket (ref: flood-sensor/src/curah_hujan.cpp) ─
-TIPPING_BUCKET_GPIO = None     # TODO pin Pi (bukan GPIO17 ESP32)
+TIPPING_BUCKET_GPIO = 22      # pin fisik 15 (GPIO bebas, aman)
 TIPPING_DEBOUNCE_US = 500000   # 500ms (dari ref delay(500)); pigpio glitch filter
 RAIN_MM_PER_TIP = 0.70         # dari ref; TODO verifikasi fisik bucket ini
 
