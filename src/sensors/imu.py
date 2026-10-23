@@ -1,6 +1,10 @@
 """
-MPU6050 Accelerometer + Gyroscope reader via I2C.
-Provides roll, pitch, and angular rates. No magnetometer on this chip.
+MPU6050 / MPU6500 / MPU9250 Accelerometer + Gyroscope reader via I2C.
+Provides roll, pitch, and angular rates. The magnetometer (if any) is NOT used here.
+
+Supported WHO_AM_I values (accel/gyro register map is identical for all of them):
+  0x68 MPU6050, 0x98 MPU6050 clone, 0x70 MPU6500, 0x71 MPU9250, 0x73 MPU9255
+Many "GY-521 / MPU6050" boards sold online actually carry an MPU6500 (0x70).
 """
 
 import asyncio
@@ -29,6 +33,19 @@ MPU6050_REG_TEMP_OUT_H = 0x41
 MPU6050_REG_GYRO_XOUT_H = 0x43
 MPU6050_REG_WHO_AM_I = 0x75
 
+# MPU6500-family only: separate accel low-pass filter register
+MPU6500_REG_ACCEL_CONFIG2 = 0x1D
+
+# WHO_AM_I values we accept
+_WHO_AM_I_KNOWN = {
+    0x68: "MPU6050",
+    0x98: "MPU6050 (clone)",
+    0x70: "MPU6500",
+    0x71: "MPU9250",
+    0x73: "MPU9255",
+}
+_MPU6500_FAMILY = {0x70, 0x71, 0x73}
+
 # Scale factors
 ACCEL_SCALE = {2: 16384.0, 4: 8192.0, 8: 4096.0, 16: 2048.0}  # LSB/g
 GYRO_SCALE = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}  # LSB/(deg/s)
@@ -37,11 +54,13 @@ GYRO_SCALE = {250: 131.0, 500: 65.5, 1000: 32.8, 2000: 16.4}  # LSB/(deg/s)
 _INIT_RETRY_S = 5.0
 # A read older than this is treated as stale (sensor stopped updating)
 _STALE_AFTER_S = 0.5
+# Consecutive failed reads before the bus is closed and the chip re-initialized
+_MAX_READ_FAILURES = 20
 
 
 @dataclass
 class IMUData:
-    """Container for MPU6050 sensor data."""
+    """Container for IMU sensor data."""
     accel_x: float = 0.0  # m/s^2
     accel_y: float = 0.0
     accel_z: float = 0.0
@@ -56,7 +75,7 @@ class IMUData:
 
 
 class MPU6050Reader:
-    """Reader for MPU6050 IMU via I2C."""
+    """Reader for MPU6050 / MPU6500 / MPU9250 IMU via I2C."""
 
     def __init__(
         self,
@@ -75,6 +94,12 @@ class MPU6050Reader:
         self.data = IMUData()
         self._running = False
 
+        # Init state
+        self._initialized = False
+        self._is_6500 = False            # MPU6500 family (affects temp formula + ACCEL_CONFIG2)
+        self._unsupported_chip = False   # WHO_AM_I not in known list -> don't retry forever
+        self._consecutive_failures = 0
+
         # Calibration offsets (calibrate on startup)
         self._gyro_offset_x = 0.0
         self._gyro_offset_y = 0.0
@@ -82,10 +107,11 @@ class MPU6050Reader:
         self._is_calibrated = False
 
     def initialize(self) -> bool:
-        """Initialize MPU6050 registers. Returns True on success.
+        """Initialize IMU registers. Returns True on success.
 
         Retries up to 3 times with increasing delay to handle transient
-        I2C errors that can occur right after power-up.
+        I2C errors that can occur right after power-up. A wrong WHO_AM_I
+        is not transient, so it fails immediately without retrying.
         """
         max_retries = 3
         for attempt in range(1, max_retries + 1):
@@ -95,10 +121,18 @@ class MPU6050Reader:
 
                 # Check WHO_AM_I register
                 who = self._bus.read_byte_data(self._addr, MPU6050_REG_WHO_AM_I)
-                if who not in (0x68, 0x98):  # 0x68 for genuine, 0x98 for clones
-                    log.error("MPU6050 WHO_AM_I returned 0x%02X, expected 0x68", who)
+                if who not in _WHO_AM_I_KNOWN:
+                    log.error("IMU WHO_AM_I returned 0x%02X (unsupported chip)", who)
+                    self._unsupported_chip = True
                     self.close()
                     return False
+
+                self._is_6500 = who in _MPU6500_FAMILY
+                if who != 0x68:
+                    log.warning(
+                        "IMU is %s (WHO_AM_I=0x%02X), not a genuine MPU6050 - using compat mode",
+                        _WHO_AM_I_KNOWN[who], who,
+                    )
 
                 # Wake up (clear sleep bit)
                 self._bus.write_byte_data(self._addr, MPU6050_REG_PWR_MGMT_1, 0x00)
@@ -119,9 +153,15 @@ class MPU6050Reader:
                 gyro_bits = {250: 0x00, 500: 0x08, 1000: 0x10, 2000: 0x18}[self._gyro_range]
                 self._bus.write_byte_data(self._addr, MPU6050_REG_GYRO_CONFIG, gyro_bits)
 
+                # MPU6500 family: accel has its own DLPF register (~44Hz to match CONFIG=0x03)
+                if self._is_6500:
+                    self._bus.write_byte_data(self._addr, MPU6500_REG_ACCEL_CONFIG2, 0x03)
+
+                self._initialized = True
+                self._consecutive_failures = 0
                 log.info(
-                    "MPU6050 initialized: accel=%dg, gyro=%ddeg/s, rate=%dHz",
-                    self._accel_range, self._gyro_range, self._sample_rate,
+                    "%s initialized: accel=%dg, gyro=%ddeg/s, rate=%dHz",
+                    _WHO_AM_I_KNOWN[who], self._accel_range, self._gyro_range, self._sample_rate,
                 )
                 return True
 
@@ -129,17 +169,20 @@ class MPU6050Reader:
                 if attempt < max_retries:
                     delay = 0.2 * attempt  # 0.2s, 0.4s
                     log.warning(
-                        "MPU6050 init attempt %d/%d failed: %s — retrying in %.1fs",
+                        "IMU init attempt %d/%d failed: %s - retrying in %.1fs",
                         attempt, max_retries, e, delay,
                     )
                     time.sleep(delay)
                 else:
-                    log.error("MPU6050 init failed after %d attempts: %s", max_retries, e)
+                    log.error("IMU init failed after %d attempts: %s", max_retries, e)
+                    self.close()
                     return False
+
+        return False
 
     def calibrate_gyro(self, samples: int = 200):
         """Calibrate gyroscope offsets. Keep the IMU still during calibration."""
-        log.info("Calibrating MPU6050 gyro (%d samples)... Keep IMU still!", samples)
+        log.info("Calibrating IMU gyro (%d samples)... Keep IMU still!", samples)
         gx_sum = gy_sum = gz_sum = 0.0
         success_count = 0
 
@@ -195,7 +238,9 @@ class MPU6050Reader:
         try:
             raw = self._bus.read_i2c_block_data(self._addr, MPU6050_REG_TEMP_OUT_H, 2)
             temp_raw = struct.unpack(">h", bytes(raw[0:2]))[0]
-            return temp_raw / 340.0 + 36.53
+            if self._is_6500:
+                return temp_raw / 333.87 + 21.0   # MPU6500 / MPU9250
+            return temp_raw / 340.0 + 36.53       # MPU6050
         except Exception:
             return 0.0
 
@@ -238,28 +283,54 @@ class MPU6050Reader:
         return self.data_age > _STALE_AFTER_S
 
     async def read_loop(self):
-        """Async read loop at configured sample rate. Run as asyncio task."""
+        """Async read loop at configured sample rate. Run as asyncio task.
+
+        All blocking I2C work (init, calibration, reads) runs in the default
+        executor so the event loop (control loop, ESP32 heartbeat, Firebase)
+        is never blocked. If the bus dies mid-run the chip is re-initialized.
+        """
         self._running = True
-
-        while self._running and not self._bus:
-            if self.initialize():
-                break
-            log.warning("IMU init failed — retrying in %.0fs", _INIT_RETRY_S)
-            await asyncio.sleep(_INIT_RETRY_S)
-        if not self._running:
-            return
-
-        if not self._is_calibrated:
-            self.calibrate_gyro()
+        loop = asyncio.get_running_loop()
         interval = 1.0 / self._sample_rate
 
-        log.info("IMU read_loop started at %dHz", self._sample_rate)
         while self._running:
+            # ---- (Re)initialize phase ----
+            if not self._initialized:
+                ok = await loop.run_in_executor(None, self.initialize)
+                if not ok:
+                    if self._unsupported_chip:
+                        log.error(
+                            "IMU disabled: unsupported chip. Fusion will run without gyro."
+                        )
+                        return
+                    log.warning("IMU init failed - retrying in %.0fs", _INIT_RETRY_S)
+                    await asyncio.sleep(_INIT_RETRY_S)
+                    continue
+
+                if not self._is_calibrated:
+                    await loop.run_in_executor(None, self.calibrate_gyro)
+                log.info("IMU read_loop started at %dHz", self._sample_rate)
+
+            # ---- Read phase ----
             t0 = time.monotonic()
             try:
-                await asyncio.get_running_loop().run_in_executor(None, self.read)
+                ok = await loop.run_in_executor(None, self.read)
             except Exception as e:
                 log.error("IMU read error: %s", e)
+                ok = False
+
+            if ok:
+                self._consecutive_failures = 0
+            else:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= _MAX_READ_FAILURES:
+                    log.error(
+                        "IMU: %d consecutive read failures - resetting I2C and re-initializing",
+                        self._consecutive_failures,
+                    )
+                    self.data.valid = False
+                    self.close()  # sets _initialized=False -> init phase next iteration
+                    continue
 
             elapsed = time.monotonic() - t0
             sleep_time = max(0, interval - elapsed)
@@ -273,7 +344,11 @@ class MPU6050Reader:
 
     def close(self):
         """Close the I2C bus."""
+        self._initialized = False
         if self._bus:
-            self._bus.close()
+            try:
+                self._bus.close()
+            except Exception:
+                pass
             self._bus = None
             log.info("IMU I2C bus closed")
