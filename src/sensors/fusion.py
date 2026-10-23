@@ -1,5 +1,5 @@
 """
-Sensor Fusion: Complementary filter combining GPS, MPU6050, and HMC5883L.
+Sensor Fusion: Complementary filter combining GPS, IMU (MPU6050/6500), and magnetometer.
 
 Heading strategy:
   - Magnetometer = primary absolute heading reference
@@ -54,6 +54,12 @@ class SensorFusion:
     GPS_HEADING_MIN_SPEED = 0.3
     # Rate-limit interval for gyro-only heading warning (seconds)
     _GYRO_ONLY_WARN_INTERVAL = 30.0
+    # Heading convention: compass heading increases CLOCKWISE (seen from above).
+    # The IMU Z axis points up out of the chip, so positive gyro_z is
+    # COUNTER-clockwise. If the chip is mounted component-side up, set this
+    # to -1.0. Verify by rotating the boat clockwise by hand: with the right
+    # sign, the integrated gyro heading and the mag heading move the same way.
+    GYRO_YAW_SIGN = 1.0
 
     def __init__(
         self,
@@ -75,7 +81,7 @@ class SensorFusion:
 
         self.state = FusedState()
         self._running = False
-        self._last_update_time = 0.0
+        self._last_update_mono = 0.0  # monotonic clock, immune to NTP jumps
         self._gyro_heading = 0.0  # Integrated gyro heading
         self._heading_initialized = False  # Snap to first valid mag reading
         self._last_gps_timestamp = 0.0  # Track last GPS update time
@@ -92,8 +98,9 @@ class SensorFusion:
     def update(self) -> FusedState:
         """Run one fusion update cycle. Call at FUSION_UPDATE_RATE_HZ."""
         now = time.time()
-        dt = now - self._last_update_time if self._last_update_time > 0 else 1.0 / self._rate
-        self._last_update_time = now
+        now_mono = time.monotonic()
+        dt = now_mono - self._last_update_mono if self._last_update_mono > 0 else 1.0 / self._rate
+        self._last_update_mono = now_mono
         dt = min(dt, 0.5)  # Clamp dt to avoid huge jumps
 
         # --- Heading fusion ---
@@ -101,7 +108,10 @@ class SensorFusion:
         mag_ok = self.mag.data.valid and not self.mag.is_stale
         gps_ok = self.gps.has_fix and not self.gps.is_stale
 
-        # Snap heading to the first valid magnetometer reading — avoids a
+        # Signed yaw rate in compass convention (clockwise positive)
+        yaw_rate = self.imu.data.gyro_z * self.GYRO_YAW_SIGN
+
+        # Snap heading to the first valid magnetometer reading - avoids a
         # slow multi-second convergence transient from a fake 0.0° start,
         # which previously made the vehicle look like it was rotating when
         # it was actually just catching up to the real compass heading.
@@ -113,7 +123,7 @@ class SensorFusion:
 
         if mag_ok and imu_ok:
             # Gyro integration: heading += yaw_rate * dt
-            gyro_delta = self.imu.data.gyro_z * dt
+            gyro_delta = yaw_rate * dt
             self._gyro_heading = (self._gyro_heading + gyro_delta) % 360
 
             # Complementary filter: blend gyro-propagated heading with magnetometer
@@ -137,10 +147,9 @@ class SensorFusion:
 
         elif imu_ok:
             # No magnetometer, propagate from gyro (will drift!)
-            gyro_delta = self.imu.data.gyro_z * dt
+            gyro_delta = yaw_rate * dt
             self._gyro_heading = (self._gyro_heading + gyro_delta) % 360
             self.state.heading = self._gyro_heading
-            now_mono = time.monotonic()
             if now_mono - self._last_gyro_warn_time >= self._GYRO_ONLY_WARN_INTERVAL:
                 log.warning("Heading from gyro only - will drift!")
                 self._last_gyro_warn_time = now_mono
@@ -168,8 +177,12 @@ class SensorFusion:
         if imu_ok:
             self.state.roll = self.imu.data.roll
             self.state.pitch = self.imu.data.pitch
-            self.state.yaw_rate = self.imu.data.gyro_z
+            self.state.yaw_rate = yaw_rate
             self.state.imu_valid = True
+        else:
+            # Don't let stale values leak into the heading PID's derivative term
+            self.state.imu_valid = False
+            self.state.yaw_rate = 0.0
 
         self.state.mag_valid = mag_ok
         self.state.timestamp = now
@@ -200,4 +213,3 @@ class SensorFusion:
     def get_state(self) -> FusedState:
         """Return the current fused state (thread-safe read)."""
         return self.state
-
