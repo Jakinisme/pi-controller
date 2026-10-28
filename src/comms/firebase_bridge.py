@@ -113,6 +113,11 @@ class FirebaseBridge:
         # Command handler callback (set by main.py)
         self._command_handler: Optional[Callable[[RemoteCommand], Awaitable[None]]] = None
 
+        # Streaming listener state (set up in command_listener_loop)
+        self._listener = None
+        self._cmd_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._cmd_queue: Optional[asyncio.Queue] = None
+
         if not enabled:
             log.info("Firebase bridge disabled")
             return
@@ -257,6 +262,52 @@ class FirebaseBridge:
             time.sleep(2.0)  # Back off so a Firebase outage isn't hammered
             return None
 
+    def _start_listen(self) -> bool:
+        """Subscribe to the commands node (streaming push, no polling).
+
+        firebase-admin runs the callback on its own thread and reconnects
+        automatically, so every dashboard write is delivered — including a
+        short-lived one that the next write overwrites a few ms later.
+        """
+        if not self._enabled or self._ref is None:
+            return False
+        try:
+            self._listener = self._ref.child("commands").listen(
+                self._on_command_event, self._on_command_error
+            )
+            log.info("Firebase command listener subscribed (streaming)")
+            return True
+        except Exception as e:
+            log.error("Firebase listen failed: %s", e)
+            return False
+
+    def _on_command_event(self, event):
+        """Runs on the firebase-admin stream thread (never blocks)."""
+        try:
+            data = event.data
+            if not isinstance(data, dict):
+                return  # node deleted
+
+            cmd_ts = float(data.get("timestamp", 0))
+            if cmd_ts <= self._last_command_ts:
+                return  # already processed (also filters our own ack writes)
+
+            self._last_command_ts = cmd_ts
+            cmd = RemoteCommand.from_dict(data)
+            log.info(
+                "Command received: mode=%s, waypoints=%d, manual=[%.2f,%.2f,%.2f]",
+                cmd.mode, len(cmd.waypoints),
+                cmd.manual_surge, cmd.manual_sway, cmd.manual_yaw,
+            )
+
+            if self._cmd_loop is not None and self._cmd_queue is not None:
+                self._cmd_loop.call_soon_threadsafe(self._cmd_queue.put_nowait, cmd)
+        except Exception as e:
+            log.error("Command event error: %s", e)
+
+    def _on_command_error(self, exc: Exception):
+        log.error("Firebase command stream error: %s", exc)
+
     def _ack_command(self, cmd: RemoteCommand, error: Optional[str] = None):
         """Write ack (or ack_error) only after the handler has actually run."""
         if not self._enabled or self._ref is None:
@@ -284,32 +335,63 @@ class FirebaseBridge:
             await asyncio.sleep(interval)
 
     async def command_listener_loop(self):
-        """Async loop: polls Firebase for new commands and dispatches handler."""
+        """Async loop: dispatch commands pushed by the Firebase stream listener.
+
+        Polling is only a fallback — a 0.5s snapshot poll can miss a write that
+        is overwritten before the next read, which is what made short joystick
+        inputs get dropped.
+        """
         if not self._running:
             self._running = True
-        poll_interval = 0.5  # Check every 500ms
-        log.info("Firebase command listener started (poll %.1fs)", poll_interval)
 
+        self._cmd_loop = asyncio.get_running_loop()
+        self._cmd_queue = asyncio.Queue()
+
+        streaming = await self._cmd_loop.run_in_executor(None, self._start_listen)
+        if not streaming:
+            log.warning("Streaming unavailable — falling back to 0.5s command polling")
+            await self._poll_command_loop()
+            return
+
+        while self._running:
+            try:
+                cmd = await asyncio.wait_for(self._cmd_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            await self._dispatch_command(cmd)
+
+    async def _poll_command_loop(self):
+        """Fallback: 0.5s snapshot polling (can drop overwritten writes)."""
+        poll_interval = 0.5
+        log.info("Firebase command polling started (%.1fs)", poll_interval)
         while self._running:
             cmd = await asyncio.get_running_loop().run_in_executor(
                 None, self._listen_for_commands
             )
-            if cmd is not None and self._command_handler is not None:
-                loop = asyncio.get_running_loop()
-                try:
-                    await self._command_handler(cmd)
-                except Exception as e:
-                    log.error("Command handler error: %s", e)
-                    await loop.run_in_executor(
-                        None, self._ack_command, cmd, str(e)
-                    )
-                else:
-                    await loop.run_in_executor(None, self._ack_command, cmd)
-
+            if cmd is not None:
+                await self._dispatch_command(cmd)
             await asyncio.sleep(poll_interval)
+
+    async def _dispatch_command(self, cmd: RemoteCommand):
+        if self._command_handler is None:
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            await self._command_handler(cmd)
+        except Exception as e:
+            log.error("Command handler error: %s", e)
+            await loop.run_in_executor(None, self._ack_command, cmd, str(e))
+        else:
+            await loop.run_in_executor(None, self._ack_command, cmd)
 
     def stop(self):
         self._running = False
+        if self._listener is not None:
+            try:
+                self._listener.close()
+            except Exception as e:
+                log.error("Firebase listener close failed: %s", e)
+            self._listener = None
         log.info("Firebase bridge stopping")
 
     # ------------------------------------------------------------------

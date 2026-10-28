@@ -27,6 +27,9 @@ from src.config import (
     HEADING_PID_INTEGRAL_LIMIT, HEADING_PID_OUTPUT_LIMIT,
     THRUST_DEADZONE,
     WAYPOINT_MAX_SPEED,
+    WAYPOINT_MIN_SURGE,
+    WAYPOINT_SURGE_FALLOFF_DEG,
+    WAYPOINT_TURN_IN_PLACE_DEG,
 )
 from src.utils.geo import heading_error
 from src.utils.logger import setup_logger
@@ -124,23 +127,26 @@ class ThrustComputer:
 
     def _compute_waypoint(self, nav: NavigationOutput, state: FusedState) -> tuple:
         """Waypoint following: surge forward along desired heading, PID corrects yaw.
-        
+
         Returns:
             (surge, yaw)
         """
-        # Heading PID: correct heading error via yaw
-        heading_err = heading_error(state.heading, nav.desired_heading)
+        heading_err = abs(heading_error(state.heading, nav.desired_heading))
         yaw = self.pid_heading.compute(nav.desired_heading, state.heading)
 
-        # Surge: scale desired speed, but reduce when heading error is large
-        # (don't push forward when pointing wrong way)
-        heading_factor = max(0.0, 1.0 - abs(heading_err) / 90.0)
-        surge = nav.desired_speed * heading_factor
-        # Normalize surge to [-1, 1] (desired_speed is in m/s, normalize by max)
-        if WAYPOINT_MAX_SPEED > 0:
-            surge = max(-1.0, min(1.0, surge / WAYPOINT_MAX_SPEED))
+        # Aim first: with the boat sideways to the target, forward thrust only
+        # makes it orbit, so drop surge and rotate in place.
+        if heading_err >= WAYPOINT_TURN_IN_PLACE_DEG:
+            return 0.0, yaw
 
-        return surge, yaw
+        # Surge: taper with heading error but never below the floor, then
+        # normalise by hull speed so the command uses the full [-1, 1] range.
+        heading_factor = max(WAYPOINT_MIN_SURGE,
+                             1.0 - heading_err / WAYPOINT_SURGE_FALLOFF_DEG)
+        speed_norm = WAYPOINT_MAX_SPEED if WAYPOINT_MAX_SPEED > 0 else 1.0
+        surge = nav.desired_speed * heading_factor / speed_norm
+
+        return max(-1.0, min(1.0, surge)), yaw
 
     def _compute_station_keeping(self, nav: NavigationOutput, state: FusedState) -> tuple:
         """Dynamic positioning: PID on position error -> surge/sway, PID on heading -> yaw.

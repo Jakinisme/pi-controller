@@ -42,10 +42,10 @@ ESP32 jalankan: 4 ESC motor (BLHeli_S, PWM 50 Hz), link serial ke Pi.
 
 | Fungsi | GPIO | Posisi | Catatan |
 |---|---|---|---|
-| Motor **NW** | **GPIO 25** | front-left | `PIN_MOTOR_NW` di `firmware-esp/src/header/config.h` |
-| Motor **NE** | **GPIO 26** | front-right | `PIN_MOTOR_NE` |
-| Motor **SW** | **GPIO 27** | rear-left | `PIN_MOTOR_SW` |
-| Motor **SE** | **GPIO 14** | rear-right | `PIN_MOTOR_SE` |
+| Motor **NW** | **GPIO 33** | front-left (kiri depan) | `PIN_MOTOR_NW` di `firmware-esp/src/header/config.h` |
+| Motor **NE** | **GPIO 25** | front-right (kanan depan) | `PIN_MOTOR_NE` |
+| Motor **SW** | **GPIO 26** | rear-left (kiri belakang) | `PIN_MOTOR_SW` |
+| Motor **SE** | **GPIO 27** | rear-right (kanan belakang) | `PIN_MOTOR_SE` |
 | Status LED | GPIO 2 | built-in DevKit | `PIN_LED` |
 | UART TX → Pi | GPIO 1 (default) | default UART0 | 115200 baud |
 | UART RX ← Pi | GPIO 3 (default) | default UART0 | 115200 baud |
@@ -86,10 +86,10 @@ GPIO 23  GPS bit-bang (pin 16)
 GPIO 1   UART TX      -> Pi RX
 GPIO 2   LED built-in
 GPIO 3   UART RX      <- Pi TX
-GPIO 14  Motor SE     (rear-right)
-GPIO 25  Motor NW     (front-left)
-GPIO 26  Motor NE     (front-right)
-GPIO 27  Motor SW     (rear-left)
+GPIO 25  Motor NE     (kanan depan)
+GPIO 26  Motor SW     (kiri belakang)
+GPIO 27  Motor SE     (kanan belakang)
+GPIO 33  Motor NW     (kiri depan)
 ```
 
 ---
