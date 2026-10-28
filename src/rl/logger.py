@@ -118,7 +118,13 @@ class RLLogger:
         now = self._clock()
         while self._queue:
             row = self._queue.popleft()
-            line = self._format(row)
+            try:
+                line = self._format(row)
+            except Exception:
+                # A single unformattable row must not orphan everything queued
+                # behind it: count it and keep going.
+                self._errors += 1
+                continue
             need = len(line.encode("utf-8"))
             if self._fh is None:
                 self._open_next()

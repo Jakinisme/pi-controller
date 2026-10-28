@@ -532,7 +532,21 @@ class ControllerMux:
         hdg = getattr(wp, "heading_hold", None)
         if hdg is not None:
             goal["heading_deg"] = hdg
+        # Later waypoints, so the policy sees the same lookahead it trained with
+        # (CONTRACT §4.8). Omitted at the last waypoint — the policy then sees
+        # those obs components as 0.0, which is the documented last-waypoint gap.
+        for key, offset in (("next_lat", 1), ("next2_lat", 2)):
+            later = self._waypoint_at(offset)
+            if later is not None:
+                goal[key] = float(later.latitude)
+                goal[key.replace("lat", "lon")] = float(later.longitude)
         return goal
+
+    def _waypoint_at(self, offset: int):
+        wps = getattr(self.navigator, "waypoints", None) or []
+        idx = getattr(self.navigator, "current_wp_index", 0)
+        j = idx + offset
+        return wps[j] if 0 <= j < len(wps) else None
 
     def _current_waypoint(self):
         wp = getattr(self.navigator, "current_waypoint", None)
