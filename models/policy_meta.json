@@ -1,0 +1,52 @@
+{
+  "obs_dim": 150,
+  "act_dim": 3,
+  "k_history": 10,
+  "obs_offset": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "obs_scale": [
+    10.0,
+    10.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.5,
+    1.0,
+    1.0,
+    1.0,
+    10.0,
+    10.0,
+    10.0,
+    10.0,
+    1.0
+  ],
+  "obs_clip_norm": 5.0,
+  "input_name": "obs",
+  "output_name": "action",
+  "policy_dt_s": 0.1,
+  "safety": {
+    "clip": 1.0,
+    "rate_limit_per_s": 2.0,
+    "geofence_m": 80.0,
+    "watchdog_s": 0.5
+  },
+  "source_ckpt": "runs/r7_300m/ckpt/ckpt_last.pt",
+  "steps": 299958272,
+  "iteration": 4577
+}

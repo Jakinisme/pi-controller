@@ -11,11 +11,13 @@ DATA FLOW:
       sensors:   { gps_valid, imu_valid, mag_valid, num_satellites }
       anomaly:   { gps, imu, mag, score }
       nav:       { mode, waypoint_index, total_waypoints, distance_to_wp }
+      control:   { controller, source, fault }   # active controller + mux state
       timestamp: <unix>
 
   React -> Firebase -> RPi (commands):
     /vehicles/{id}/commands/
       mode: "idle" | "waypoint" | "station_keep" | "manual"
+      controller: "pid" | "ppo"   # selects the controller; absent -> "pid"
       waypoints: [{ lat, lon, name, heading_hold }]
       manual:    { surge, sway, yaw }
       heading:   <degrees>   # for station_keep
@@ -55,6 +57,7 @@ except ImportError:
 class RemoteCommand:
     """Command received from React dashboard via Firebase."""
     mode: str = "idle"                      # idle, waypoint, station_keep, manual
+    controller: str = "pid"                 # "pid" | "ppo"; unknown -> "pid"
     waypoints: List[Dict[str, Any]] = field(default_factory=list)
     manual_surge: float = 0.0
     manual_sway: float = 0.0
@@ -67,8 +70,13 @@ class RemoteCommand:
     def from_dict(cls, data: dict) -> "RemoteCommand":
         manual = data.get("manual", {})
         wps = data.get("waypoints", [])
+        controller = data.get("controller", "pid")
+        if controller not in ("pid", "ppo"):
+            log.warning("Unknown controller %r in command -> 'pid'", controller)
+            controller = "pid"
         return cls(
             mode=data.get("mode", "idle"),
+            controller=controller,
             waypoints=wps if isinstance(wps, list) else list(wps.values()) if isinstance(wps, dict) else [],
             manual_surge=float(manual.get("surge", 0)),
             manual_sway=float(manual.get("sway", 0)),
@@ -185,6 +193,17 @@ class FirebaseBridge:
             "waypoint_index": waypoint_index,
             "total_waypoints": total_waypoints,
             "distance_to_wp": round(distance_to_wp, 2),
+        })
+
+    def push_control(self, controller: str, source: str, fault: Optional[str] = None):
+        """Queue active-controller telemetry (node telemetry/control). Least
+        invasive: a new additive node under the existing telemetry/ path, no
+        existing node touched. controller = selected (pid|ppo); source = the
+        mux's last emitted source; fault = mux fault or None."""
+        self.queue_telemetry("telemetry/control", {
+            "controller": controller,
+            "source": source,
+            "fault": fault or "",
         })
 
     def push_anomaly(self, gps: bool, imu: bool, mag: bool, score: float = 0.0):

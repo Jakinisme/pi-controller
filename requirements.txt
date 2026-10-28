@@ -15,6 +15,11 @@ firebase-admin>=6.2.0
 
 # ML inference
 scikit-learn>=1.3.0
+# PPO policy runtime (RL_* in src/config.py). This is the Raspberry Pi 3B /
+# Raspberry Pi OS Lite 64-bit (bookworm, glibc 2.36) aarch64 wheel:
+# onnxruntime-<ver>-cp312-cp312-manylinux_2_28_aarch64.whl (also cp311/cp313).
+# Deliberately NO torch: inference runs on onnxruntime+numpy only.
+onnxruntime==1.31.1
 
 # Note: fastapi, uvicorn are NOT needed here.
 # The React dashboard (separate project) handles the UI.

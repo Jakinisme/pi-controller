@@ -124,3 +124,30 @@ LOG_LEVEL = "INFO"
 LOG_FILE = str(BASE_DIR / "logs" / "asv.log")
 LOG_TO_FILE = True
 LOG_TO_CONSOLE = True
+
+# ---------------------------------------------------------------------------
+# RL Policy (PPO) — deployment safety, not training
+# ---------------------------------------------------------------------------
+# Every value here is a Pi-side deployment limit. The training repo's own
+# safety block (drl/runs/r7_policy_meta.json) is NOT deployment config: the
+# Pi-side ControllerMux overrides geofence and watchdog on purpose.
+RL_ENABLED = False                    # deployment safety, not training — PID is the default controller
+RL_DEFAULT_CONTROLLER = "pid"         # deployment safety, not training — "pid" or "ppo"
+RL_MODEL_PATH = str(BASE_DIR / "models" / "policy.onnx")
+RL_META_PATH = str(BASE_DIR / "models" / "policy_meta.json")
+# The Pi runs from ~/pi-controller (BASE_DIR).  On a dev laptop the model lives in
+# the repo, so fall back to it rather than reporting the policy as unavailable.
+if not Path(RL_MODEL_PATH).exists():
+    _repo_models = Path(__file__).resolve().parent.parent / "models"
+    if (_repo_models / "policy.onnx").exists():
+        RL_MODEL_PATH = str(_repo_models / "policy.onnx")
+        RL_META_PATH = str(_repo_models / "policy_meta.json")
+RL_GEOFENCE_M = 20.0                  # deployment safety, not training — policy meta default 80 m must NOT be used for early trials
+RL_WATCHDOG_S = 0.5                   # deployment safety, not training — max age of the fused state before PID fallback
+RL_MAX_INFERENCE_MS = 50              # deployment safety, not training — slowest acceptable policy step
+RL_MAX_THRUST_SCALE = 1.0             # deployment safety, not training — below 1.0 changes behaviour
+RL_LOG_DIR = str(BASE_DIR / "logs" / "rl")
+# Same dev-laptop fallback as the model paths above: a missing ~/pi-controller
+# must not lose the black-box log (the sysid/replay input).
+if not Path(BASE_DIR / "models" / "policy.onnx").exists():
+    RL_LOG_DIR = str(Path(__file__).resolve().parent.parent / "logs" / "rl")
