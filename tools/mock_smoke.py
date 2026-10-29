@@ -90,7 +90,9 @@ class SimpleVessel:
 
     def step(self, cmd, dt):
         u_t = cmd.surge * self.MAX_SPEED_MPS
-        v_t = -cmd.sway * self.MAX_SPEED_MPS * self.SWAY_GAIN   # +sway = right = negative in ENU below
+        # sway + = starboard (+) per thrust.py / frames.body_to_enu, so v_t keeps the
+        # sign: the earlier negation here inverted the lateral axis.
+        v_t = cmd.sway * self.MAX_SPEED_MPS * self.SWAY_GAIN
         a = dt / (self.TAU_S + dt)
         self.u += (u_t - self.u) * a
         self.v += (v_t - self.v) * a

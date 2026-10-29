@@ -514,8 +514,21 @@ class ControllerMux:
             "mag_valid": bool(getattr(state, "mag_valid", False)),
             "sensor_ok": gps_valid and bool(getattr(state, "imu_valid", False))
                          and bool(getattr(state, "mag_valid", False)),
-            "t": now,
+            # RLController._check compares this against ITS OWN clock, so it must be
+            # stamped in that clock's domain, not the mux's `now`. Passing a foreign
+            # clock reads as an ancient fix and trips the watchdog permanently.
+            "t": self._policy_clock(now),
         }
+
+    def _policy_clock(self, now: float) -> float:
+        """`now` in the adapter's clock domain (falls back to `now` if unreadable)."""
+        clock = getattr(self.adapter, "_clock", None)
+        if not callable(clock):
+            return float(now)
+        try:
+            return float(str(clock()))
+        except Exception:
+            return float(now)
 
     def _course(self, state: FusedState) -> Optional[float]:
         try:
