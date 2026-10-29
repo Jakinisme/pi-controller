@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import (
     FUSION_UPDATE_RATE_HZ,
     FIREBASE_VEHICLE_ID,
+    RL_LOG_DIR,
 )
 from src.sensors.gps import GPSReader
 from src.sensors.imu import MPU6050Reader
@@ -39,6 +40,9 @@ from src.control.navigation import WaypointNavigator, Waypoint, NavigationState
 from src.control.thrust import ThrustComputer
 from src.comms.esp32_link import ESP32Link
 from src.comms.firebase_bridge import FirebaseBridge, RemoteCommand
+from src.control.controller_mux import ControllerMux
+from src.rl.adapter import RLAdapter
+from src.rl.logger import RLLogger
 # ML modules disabled — uncomment when available
 # from src.ml.anomaly import AnomalyDetector
 # from src.ml.prediction import DriftPredictor
@@ -77,6 +81,21 @@ class ASVSystem:
         self.navigator = WaypointNavigator()
         self.thrust = ThrustComputer()
 
+        # RL policy adapter (fail-soft: available=False + a reason when
+        # onnxruntime or the model is missing) + the safety mux that owns
+        # the PID/PPO decision. self.thrust stays: manual/reset use it.
+        #
+        # One shared clock feeds both: the mux stamps est["t"] from it and
+        # RLController runs its own watchdog against it, so they must be the
+        # same source or every policy step would look stale.
+        self._rl_clock = time.monotonic
+        self.rl_adapter = RLAdapter.from_config(clock=self._rl_clock)
+        self.rl_logger = RLLogger(RL_LOG_DIR)
+        self.controller = ControllerMux(
+            self.thrust, self.rl_adapter, self.navigator, self.gps,
+            clock=self._rl_clock, rl_logger=self.rl_logger,
+        )
+
         # Communication
         self.esp32 = ESP32Link()
         self.firebase = FirebaseBridge(vehicle_id=FIREBASE_VEHICLE_ID)
@@ -102,6 +121,9 @@ class ASVSystem:
     async def _handle_remote_command(self, cmd: RemoteCommand):
         """Process a command received from the React dashboard via Firebase."""
         log.info("Processing remote command: mode=%s", cmd.mode)
+        # Takes effect within one control tick; absent field -> "pid"
+        # (RemoteCommand default), every branch below unchanged.
+        self.controller.set_controller_request(cmd.controller)
 
         if cmd.mode == "idle":
             self.navigator.stop()
@@ -178,7 +200,7 @@ class ASVSystem:
                 )
 
                 # 3. Compute thrust via PID controllers
-                thrust_cmd = self.thrust.compute(nav_output, state)
+                thrust_cmd = self.controller.compute(nav_output, state)
 
                 # 4. Send to ESP32
                 self.esp32.send_thrust(thrust_cmd)
@@ -201,6 +223,10 @@ class ASVSystem:
                     self.navigator.current_wp_index,
                     len(self.navigator.waypoints),
                     distance_to_wp=self.navigator.distance_to_waypoint,
+                )
+                self.firebase.push_control(
+                    self.controller.selected, self.controller.source,
+                    self.controller.fault,
                 )
 
                 # --- Periodic status log (every 5s) ---
@@ -320,6 +346,12 @@ class ASVSystem:
         self.firebase.stop()
         if self.ml_fanout:
             self.ml_fanout.stop()
+
+        # Flush the RL black-box log (sysid/replay input) before hardware closes
+        try:
+            self.rl_logger.close()
+        except Exception as e:
+            log.warning("RL logger close failed: %s", e)
 
         # Close hardware
         self.gps.close()

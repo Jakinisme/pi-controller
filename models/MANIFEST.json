@@ -1,0 +1,40 @@
+{
+  "checkpoint_steps": 299958272,
+  "drl_commit": "608256b224dc5e81dc541175df94256399fba4d4",
+  "drl_path": "drl",
+  "files": {
+    "models/policy.onnx": {
+      "bytes": 356448,
+      "sha256": "dbb90bb8b0123dc9276f0fefc3ff270937992a8fa30e8a14e617a8af41c49913",
+      "src": "runs/r7_policy.onnx"
+    },
+    "models/policy_meta.json": {
+      "bytes": 728,
+      "sha256": "5bacf562fe4559e467e848d46cdc12a5064e1c8c56650dffa2144248c6399713",
+      "src": "runs/r7_policy_meta.json"
+    },
+    "src/rl/estimator.py": {
+      "bytes": 3584,
+      "sha256": "c09f23aca2aa56139442981554417c75f4227824a16f895f93cfdd1097bf2198",
+      "src": "common/estimator.py"
+    },
+    "src/rl/frames.py": {
+      "bytes": 4328,
+      "sha256": "db1defb76e42cfebca86524fa7c91fa47735deb2349f2c5baca83509c3a9a441",
+      "src": "common/frames.py"
+    },
+    "src/rl/obs_np.py": {
+      "bytes": 5269,
+      "sha256": "6b39e9a3f751027a5c24b39e9147825e937d6165e6902e5cf2e4c1be82fb2020",
+      "src": "runtime/obs_np.py"
+    },
+    "src/rl/policy.py": {
+      "bytes": 10733,
+      "sha256": "3f6dc0c4dd6bc8e96d4a4d3c736aeb00de0ae2e9586ed136258c55d85f64c198",
+      "src": "runtime/policy.py"
+    }
+  },
+  "iteration": 4577,
+  "source_ckpt": "runs/r7_300m/ckpt/ckpt_last.pt",
+  "synced_utc": "2026-10-28T11:04:34Z"
+}

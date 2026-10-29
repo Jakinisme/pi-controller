@@ -1,0 +1,19 @@
+# Runtime state — never commit
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Black-box RL logs are per-run vessel data (sysid input), kept local
+logs/rl/
+logs/rl_smoke/
+
+# Credentials — never commit
+firebase-credentials*.json
+*.pem
+*.key
