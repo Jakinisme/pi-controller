@@ -378,6 +378,15 @@ class ControllerMux:
                 "action_applied_surge": applied[0], "action_applied_sway": applied[1],
                 "action_applied_yaw": applied[2],
                 "thrust_scale": float(_cfg("RL_MAX_THRUST_SCALE", self._config)),
+                # Replay-gap columns (logger.COLUMNS, appended 2026-11-07).
+                # `est_age_s` is left None: no caller supplies the estimator age
+                # the policy used, and inventing one would fabricate replay input.
+                "est_age_s": None,
+                "goal_heading_deg": goal.get("heading_deg"),
+                "next_lat": goal.get("next_lat"),
+                "next_lon": goal.get("next_lon"),
+                "next2_lat": goal.get("next2_lat"),
+                "next2_lon": goal.get("next2_lon"),
             })
             # Mark this source as logged so the _emit() path does not write a
             # second, duplicate row for the same tick.
@@ -426,6 +435,13 @@ class ControllerMux:
                 "action_applied_surge": last[0], "action_applied_sway": last[1],
                 "action_applied_yaw": last[2],
                 "thrust_scale": float(_cfg("RL_MAX_THRUST_SCALE", self._config)),
+                # Replay-gap columns; `est_age_s` stays None (see _emit_log_row).
+                "est_age_s": None,
+                "goal_heading_deg": goal.get("heading_deg"),
+                "next_lat": goal.get("next_lat"),
+                "next_lon": goal.get("next_lon"),
+                "next2_lat": goal.get("next2_lat"),
+                "next2_lon": goal.get("next2_lon"),
             })
         except Exception:
             pass

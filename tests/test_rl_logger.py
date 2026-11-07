@@ -5,7 +5,7 @@ enqueue, all I/O in ``flush()``/``close()``, rotation at ``max_bytes``,
 ``t_monotonic`` relative to the first row. This file drives it through the real
 ``ControllerMux`` for a mixed policy + fault run and asserts:
 
-* every CSV row carries the full 25-column header;
+* every CSV row carries the full EXPECTED_NCOLS-column header;
 * the row count equals policy steps + source-change rows, where the asserted
   rule is: **one row per policy step, plus one row on every change of the
   mux's ``source`` value, minus the policy row that itself establishes the new
@@ -37,8 +37,10 @@ EXPECTED_HEADER = (
     "t_monotonic,lat,lon,heading_deg,yaw_rate_deg_s,speed_mps,course_deg,"
     "gps_valid,imu_valid,mag_valid,goal_lat,goal_lon,mode,wp_idx,n_wp,source,"
     "fault,inference_ms,action_raw_surge,action_raw_sway,action_raw_yaw,"
-    "action_applied_surge,action_applied_sway,action_applied_yaw,thrust_scale"
+    "action_applied_surge,action_applied_sway,action_applied_yaw,thrust_scale,"
+    "est_age_s,goal_heading_deg,next_lat,next_lon,next2_lat,next2_lon"
 )
+EXPECTED_NCOLS = len(EXPECTED_HEADER.split(","))          # 31
 REPLAY_REQUIRED = ("t_monotonic", "lat", "lon", "heading_deg", "speed_mps")
 
 _WPS = [Waypoint(-6.8969, 112.0521, "w1"), Waypoint(-6.8960, 112.0525, "w2")]
@@ -118,11 +120,12 @@ def test_mixed_run_full_header_and_row_count_rule(tmp_path):
         assert path is not None and path.is_file()
 
     rows = _rows(path)
-    assert rows[0] == EXPECTED_HEADER.split(","), "header must be the frozen 25"
-    assert len(rows[0]) == 25
+    assert rows[0] == EXPECTED_HEADER.split(","), "header must be the frozen EXPECTED_NCOLS"
+    assert len(rows[0]) == EXPECTED_NCOLS
 
     for i, row in enumerate(rows[1:], start=2):
-        assert len(row) == 25, f"row {i} has {len(row)} columns, want 25: {row!r}"
+        assert len(row) == EXPECTED_NCOLS, (
+            f"row {i} has {len(row)} columns, want {EXPECTED_NCOLS}: {row!r}")
 
     # One fallback entry in the script above.
     fallback_entries = sum(1 for s in observed_sources if s != "policy")
@@ -135,6 +138,26 @@ def test_mixed_run_full_header_and_row_count_rule(tmp_path):
     assert sources == ["policy", "policy", "policy", "policy", "fallback",
                        "policy", "policy"], sources
     assert [r[16] for r in rows[1:]][4] == "gps"
+
+    # Replay-gap columns (appended 2026-11-07): present, full width, and carrying
+    # the lookahead waypoints the policy actually saw. `est_age_s` is honestly
+    # blank — no caller supplies the estimator age (see mux._emit_log_row).
+    hdr = EXPECTED_HEADER.split(",")
+    for col in ("est_age_s", "goal_heading_deg", "next_lat", "next_lon",
+                "next2_lat", "next2_lon"):
+        assert col in hdr, f"replay-gap column {col!r} missing from the header"
+    ni = hdr.index("next_lat")
+    nj = hdr.index("next_lon")
+    np2 = hdr.index("next2_lat")
+    ei = hdr.index("est_age_s")
+    for r in rows[1:]:
+        assert len(r) == EXPECTED_NCOLS, f"short row: {r!r}"
+        assert r[ei] == "", f"est_age_s must be blank (nothing supplies it): {r!r}"
+    # Waypoint run: navigator holds 2 waypoints (index 0), so `next_lat/lon` carry
+    # wp[1] and `next2_*` is the documented last-waypoint gap (absent -> blank).
+    assert rows[1][ni] == "%.6f" % _WPS[1].latitude, rows[1]
+    assert rows[1][nj] == "%.6f" % _WPS[1].longitude, rows[1]
+    assert rows[1][np2] == "", f"next2 is the last-waypoint gap, must be blank: {rows[1]!r}"
 
 
 def test_row_count_rule_is_policy_steps_plus_source_changes(tmp_path):
@@ -309,9 +332,9 @@ def test_rotation_with_small_max_bytes_loses_no_row(tmp_path):
     total = 0
     for p in parts:
         rows = _rows(tmp_path / p)
-        assert rows[0] == EXPECTED_HEADER.split(","), f"{p}: header must be 25 cols"
+        assert rows[0] == EXPECTED_HEADER.split(","), f"{p}: header must be {EXPECTED_NCOLS} cols"
         for r in rows[1:]:
-            assert len(r) == 25, f"{p}: short row {r!r}"
+            assert len(r) == EXPECTED_NCOLS, f"{p}: short row {r!r}"
         total += len(rows) - 1
     assert total == 6, f"rotation lost a row: {total} data rows across {parts!r}"
 
@@ -362,7 +385,7 @@ def test_log_never_raises_and_drops_unusable_rows(tmp_path):
     assert parts, f"no CSV written into {tmp_path}"
     rows = _data_rows(parts[0])
     assert len(rows) == 1, f"expected 1 formattable row, got {len(rows)}"
-    assert all(len(r) == 25 for r in rows)
+    assert all(len(r) == EXPECTED_NCOLS for r in rows)
 
 
 def test_unformattable_row_is_dropped_and_the_rest_land(tmp_path):
