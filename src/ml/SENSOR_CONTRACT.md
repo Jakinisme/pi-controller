@@ -40,27 +40,44 @@ Unit: `imu_accel_rms` m/s², `imu_roll_rms/pitch_rms` **rad**, `imu_dominant_fre
 
 ## 5. Skema node Firebase (`/vehicles/{id}/telemetry/ml`)
 
-Dikirim per AGG_INTERVAL (harian), bukan per sampel, lewat `firebase_bridge.push_ml()`.
+Dikirim per AGG window (lihat §4a), lewat `firebase_bridge.push_ml()`.
 
 ```json
 {
   "score": <float|null>,
   "is_anomaly": <bool|null>,
-  "interpretation": "shadow_no_scoring|normal|anomali_dijelaskan_badai|anomali_cuaca_tenang|sensor_core_hilang",
+  "interpretation": "normal|anomali_dijelaskan_badai|anomali_cuaca_tenang|sensor_core_hilang|shadow_no_scoring",
   "degraded": <bool>,
   "missing_sensors": ["pressure","imu","gps","wind","rain","wave_feed","currents"],
   "storm_context": <bool>,
   "ood": <bool>,
-  "non_operational": true,
-  "scoring_active": false,
+  "non_operational": <bool>,
+  "scoring_active": <bool>,
+  "score_reason": <str>,
   "model_version": "v2",
   "ts": <unix>
 }
 ```
 
-Dashboard React badge: `non_operational` (shadow), `degraded`, `ood`,
-`scoring_active`. **Scoring mati permanen** sampai model sensor-trained ada
-(aturan 6.6: model v2 dilatih dari proxy/satelit).
+Dashboard React badge: `non_operational`, `degraded`, `ood`, `scoring_active`.
+
+**Scoring ON** (`SCORING_ENABLED=True`): prediksi anomaly keluar. Model v2
+dilatih dari proxy (aturan 6.6), jadi output **tidak pernah** menggerakkan
+aktuator — itu yang dijaga `SHADOW_MODE=True` / `non_operational`. Output
+untuk evaluasi, bukan kontrol.
+
+`ood=True` berarti fitur live di luar rentang climatology → score tetap
+keluar tapi tidak bisa dipercaya secara fisik. Cek `degraded` +
+`missing_sensors` sebelum menyimpulkan anomali nyata.
+
+## 4a. Window agregasi
+
+Urutan prioritas: env `ML_AGG_WINDOW_SECONDS` > `config_ml.AGG_WINDOW_SECONDS`
+> `feature_list.json`. Default rig = 300s (artifact training 86400s — jangan
+pakai itu untuk evaluasi, prediksi cuma keluar sekali sehari).
+
+`ml_loop` mengambil window dari `runner.agg_window_s` supaya trigger cycle dan
+window fitur tidak berbeda.
 
 ## 6. Referensi kalibrasi sensor baru
 

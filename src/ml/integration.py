@@ -48,9 +48,18 @@ class MLFanout:
         self._running = True
         fanout_hz = 5.0
         fanout_interval = 1.0 / fanout_hz
+        # Satu sumber window: runner (artifact + env override). Sebelumnya
+        # loop pakai cfg.AGG_WINDOW_SECONDS sementara compute_base/derived
+        # pakai runner.agg_window_s -> dua nilai bisa berbeda.
+        self.window_s = (self._runner.agg_window_s if self._runner is not None
+                         else cfg.AGG_WINDOW_SECONDS)
         last_cycle_mono = now_mono()
-        score_state = "ON" if cfg.SCORING_ENABLED else "OFF (shadow)"
-        print(f"[ML] ml_loop started, scoring={score_state}, AGG={cfg.AGG_WINDOW_SECONDS}s")
+        score_state = ("ON" if (self._runner is not None
+                                and self._runner._scoring_active)
+                       else "OFF")
+        if self._runner is not None and not self._runner._scoring_active:
+            score_state = f"OFF ({self._runner._score_reason})"
+        print(f"[ML] ml_loop started, scoring={score_state}, AGG={self.window_s}s")
         while self._running:
             t0 = time.monotonic()
             try:
@@ -58,7 +67,7 @@ class MLFanout:
             except Exception as e:
                 print(f"[ML] fanout error: {e}")
             # cek apakah sudah sampai AGG_INTERVAL
-            if (time.monotonic() - last_cycle_mono) >= cfg.AGG_WINDOW_SECONDS:
+            if (time.monotonic() - last_cycle_mono) >= self.window_s:
                 last_cycle_mono = time.monotonic()
                 try:
                     self._run_cycle()
@@ -99,7 +108,8 @@ class MLFanout:
             self.imu_buf.snapshot(), self.gps_buf.snapshot(),
             self.pressure_buf.snapshot(), self.wind_buf.snapshot(),
             self.rain_buf.snapshot(),
-            model_feed=mf, mode=mode, window_s=cfg.AGG_WINDOW_SECONDS,
+            model_feed=mf, mode=mode,
+            window_s=getattr(self, "window_s", cfg.AGG_WINDOW_SECONDS),
         )
         if self._runner is None:
             return

@@ -67,17 +67,30 @@ class MLRunner:
         with open(self.clim_path) as f:
             self.climatology = json.load(f)
         self.features = self.flist["features"]          # canonical order
-        self.agg_window_s = int(self.flist.get("agg_window_seconds",
-                                               cfg.AGG_WINDOW_SECONDS))
+        # Window efektif: env > config > artifact.
+        # Artifact menyimpan 86400 (dari training harian), tapi rig ini
+        # butuh prediksi lebih sering untuk evaluasi. config_ml menang
+        # atas artifact supaya satu tempat mengubah perilaku; env menang
+        # atas keduanya untuk override sekali jalan.
+        env_win = os.environ.get("ML_AGG_WINDOW_SECONDS")
+        if env_win:
+            self.agg_window_s = int(env_win)
+        else:
+            self.agg_window_s = int(cfg.AGG_WINDOW_SECONDS)
         self.rolling_window = int(self.flist.get("rolling_window",
                                                  cfg.ROLLING_WINDOW))
         self.units = self.schema.get("units", {})
 
     def _init_scoring_guard(self):
-        """Cek apakah scoring boleh aktif. Default OFF (aturan 6.6)."""
+        """Cek apakah scoring boleh aktif.
+
+        SCORING_ENABLED=False -> mati (perilaku lama).
+        SCORING_ENABLED=True  -> load model + assert urutan fitur == schema.
+        Mismatch/hilang -> scoring mati, fitur+logging tetap jalan.
+        """
         if not cfg.SCORING_ENABLED:
             self._scoring_active = False
-            self._score_reason = "SCORING_ENABLED=False (aturan 6.6: model proxy)"
+            self._score_reason = "SCORING_ENABLED=False"
             return
         # kalau di-enable di config, masih cek model load + schema match
         try:
@@ -203,15 +216,22 @@ class MLRunner:
         if not cfg.MODEL_FEED_ENABLED:
             notes.append("model_feed=None (stub): fitur gelombang/arus diimpute climatology")
 
-        # scoring OFF by default
+        # scoring (SCORING_ENABLED + model ter-load + schema cocok)
         score = None
         is_anomaly = None
         interp = "shadow_no_scoring"
-        if self._scoring_active and not core_missing:
+        # core_missing (pressure/IMU NaN) hanya memblokir kalau diminta
+        # eksplisit. Default False: NaN sudah diimpute climatology, jadi
+        # prediksi tetap keluar dan kualitasnya ditandai degraded/ood.
+        blocked_by_core = core_missing and cfg.SCORING_BLOCK_ON_CORE_MISSING
+        if self._scoring_active and not blocked_by_core:
             try:
-                import pandas as pd
-                x = pd.DataFrame([[filled[f] for f in self.features]],
-                                 columns=self.features)
+                # numpy langsung (bukan DataFrame): urutan kolom sudah
+                # dipaksa sama dengan schema lewat self.features, jadi
+                # pandas tidak perlu dan tidak ikut ke image Pi.
+                import numpy as _np
+                x = _np.asarray([[filled[f] for f in self.features]],
+                                dtype=float)
                 score = float(self.model.decision_function(x)[0])
                 is_anomaly = bool(self.model.predict(x)[0] == -1)
                 if not is_anomaly:
@@ -224,8 +244,12 @@ class MLRunner:
                 self._scoring_active = False
                 self._score_reason = f"score_runtime_error: {e}"
                 notes.append(self._score_reason)
-        elif core_missing:
+        elif blocked_by_core:
             interp = "sensor_core_hilang"
+        if core_missing:
+            # tetap dilaporkan walau scoring jalan (jangan sembunyikan
+            # fakta pressure/IMU tidak terbaca)
+            notes.append("sensor_core_hilang: pressure/IMU NaN (diimpute climatology)")
 
         ood = self._check_ood(filled)
 
@@ -246,6 +270,9 @@ class MLRunner:
             "interpretation": interp,
             "model_version": self.flist.get("model_version", "v2"),
             "input_out_of_distribution": ood,
+            # non_operational: output ML TIDAK dipakai aktuator (selalu True
+            # selama SHADOW_MODE). Terpisah dari scoring_active supaya
+            # dashboard tidak salah baca "shadow" == "tidak ada prediksi".
             "non_operational": cfg.SHADOW_MODE,
             "scoring_active": self._scoring_active,
             "score_reason": self._score_reason,
@@ -270,6 +297,7 @@ class MLRunner:
             "ood": result["input_out_of_distribution"],
             "non_operational": result["non_operational"],
             "scoring_active": result["scoring_active"],
+            "score_reason": result["score_reason"],
             "model_version": result["model_version"],
             "ts": round(result["ts_wall"], 3),
         }

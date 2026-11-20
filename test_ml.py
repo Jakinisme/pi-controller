@@ -158,24 +158,46 @@ class TestMissingSensor:
             "_pressure_has_tide": True, "_ntp_synced": False,
         }
 
-    def test_pressure_missing_no_decision(self):
+    def test_pressure_missing_still_scores(self):
+        # SCORING_BLOCK_ON_CORE_MISSING=False: pressure NaN tidak memblokir,
+        # NaN diimpute climatology, prediksi tetap keluar, degradasi dilaporkan.
         r = MLRunner()
         base = self._full_base()
         base["sea_level"] = float("nan")
         base["pressure_level"] = float("nan")
         out = r.cycle(base, mode="station_keeping", month=1)
-        assert out["is_anomaly"] is None
         assert "pressure" in out["missing_sensors"]
+        assert out["degraded"] is True
+        if not cfg.SCORING_BLOCK_ON_CORE_MISSING:
+            assert out["score"] is not None
+            assert out["is_anomaly"] in (True, False)
+        else:
+            assert out["is_anomaly"] is None
+            assert out["interpretation"] == "sensor_core_hilang"
 
-    def test_imu_missing_no_decision(self):
+    def test_imu_missing_still_scores(self):
         r = MLRunner()
         base = self._full_base()
         for k in ("imu_accel_rms", "imu_slope_rms", "imu_roll_rms",
                   "imu_pitch_rms", "imu_dominant_freq"):
             base[k] = float("nan")
         out = r.cycle(base, mode="station_keeping", month=1)
-        assert out["is_anomaly"] is None
         assert "imu" in out["missing_sensors"]
+        if not cfg.SCORING_BLOCK_ON_CORE_MISSING:
+            assert out["score"] is not None
+            assert out["is_anomaly"] in (True, False)
+        else:
+            assert out["is_anomaly"] is None
+            assert out["interpretation"] == "sensor_core_hilang"
+
+    def test_core_missing_always_noted(self):
+        """Fakta pressure/IMU hilang tidak boleh disembunyikan oleh scoring."""
+        r = MLRunner()
+        base = self._full_base()
+        base["sea_level"] = float("nan")
+        base["pressure_level"] = float("nan")
+        out = r.cycle(base, month=1)
+        assert any("sensor_core_hilang" in n for n in out["notes"])
 
     def test_wind_missing_degraded(self):
         r = MLRunner()
@@ -194,8 +216,13 @@ class TestMissingSensor:
     def test_no_crash_empty_buffers(self):
         r = MLRunner()
         out = r.cycle({}, mode="station_keeping", month=1)
-        assert out["is_anomaly"] is None   # core hilang
+        # base kosong: semua NaN -> diimpute. Scoring tetap keluar kalau
+        # gate core_missing nonaktif; degradasi selalu dilaporkan.
         assert out["degraded"] is True
+        if cfg.SCORING_BLOCK_ON_CORE_MISSING:
+            assert out["is_anomaly"] is None
+        else:
+            assert out["is_anomaly"] in (True, False)
 
 
 # ══════════════════════════════════════════════════════
@@ -211,9 +238,33 @@ class TestSchemaConsistency:
         assert r.features == flist["features"]
         assert r.features == schema["feature_columns"]
 
-    def test_scoring_off_by_default(self):
+    def test_defaults_scoring_on_gate_off(self):
+        """Default rig: prediksi keluar (scoring ON) meski sensor core hilang.
+        Kalau ini gagal, evaluasi di web akan balik kosong."""
+        assert cfg.SCORING_ENABLED is True
+        assert cfg.SCORING_BLOCK_ON_CORE_MISSING is False
+        assert cfg.SHADOW_MODE is True   # output tetap bukan aktuator
+
+    def test_agg_window_env_override(self, monkeypatch):
+        """ML_AGG_WINDOW_SECONDS harus menang atas artifact 86400."""
+        monkeypatch.setenv("ML_AGG_WINDOW_SECONDS", "123")
         r = MLRunner()
-        assert r._scoring_active is False
+        assert r.agg_window_s == 123
+
+    def test_agg_window_default_shorter_than_training(self):
+        r = MLRunner()
+        if os.environ.get("ML_AGG_WINDOW_SECONDS"):
+            pytest.skip("env override aktif")
+        assert r.agg_window_s == cfg.AGG_WINDOW_SECONDS
+
+    def test_scoring_active_when_enabled(self):
+        """SCORING_ENABLED=True + model cocok schema -> scoring aktif dan
+        prediksi keluar. SHADOW_MODE tetap True (output tidak ke aktuator)."""
+        r = MLRunner()
+        if not cfg.SCORING_ENABLED:
+            assert r._scoring_active is False
+            return
+        assert r._scoring_active is True, f"alasan: {r._score_reason}"
         base = {
             "sea_level": 0.3, "wave_height": 1.2, "wave_direction_sin": -0.7,
             "wave_direction_cos": 0.7, "wave_period": 7.0,
@@ -227,10 +278,13 @@ class TestSchemaConsistency:
             "_rain_mm": 12.0, "_pressure_has_tide": True, "_ntp_synced": False,
         }
         out = r.cycle(base, month=1)
-        assert out["scoring_active"] is False
-        assert out["score"] is None
-        assert out["is_anomaly"] is None
-        assert out["interpretation"] == "shadow_no_scoring"
+        assert out["scoring_active"] is True
+        assert isinstance(out["score"], float)
+        assert out["is_anomaly"] in (True, False)
+        assert out["interpretation"] in (
+            "normal", "anomali_dijelaskan_badai", "anomali_cuaca_tenang")
+        # output tidak dipakai aktuator
+        assert out["non_operational"] is True
 
 
 # ══════════════════════════════════════════════════════
@@ -317,7 +371,10 @@ class TestEndToEnd:
         assert not math.isnan(base["sea_level"])
         r = MLRunner()
         out = r.cycle(base, mode="station_keeping", month=1)
-        assert out["scoring_active"] is False
+        if cfg.SCORING_ENABLED:
+            assert out["scoring_active"] is True
+        else:
+            assert out["scoring_active"] is False
         assert "wave_feed" in out["missing_sensors"]  # model_feed None
         assert "currents" in out["missing_sensors"]
         assert out["degraded"] is True

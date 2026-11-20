@@ -24,19 +24,30 @@ LOG_KEEP = 3                       # simpan 3 file rotasi
 
 # ── mode ──────────────────────────────────────────────
 # ML_ENABLED=False: lapisan ML tidak jalan sama sekali (default aman).
-# SHADOW_MODE=True: ekstraksi fitur + logging + telemetri jalan, scoring
-#   tetap mati. Hasil telemetri ditandai non_operational.
+# SHADOW_MODE=True: label telemetri tetap non_operational (tidak dipakai
+#   kontrol kapal). TIDAK lagi memblokir scoring — lihat SCORING_ENABLED.
 ML_ENABLED = True
 SHADOW_MODE = True
-# Scoring mati permanen sampai model sensor-trained schema-compatible ada.
-# Guard eksplisit; meski model joblib ada, jangan score (aturan 6.6).
-SCORING_ENABLED = False
+# Scoring ON: prediksi anomaly (score + is_anomaly) keluar ke telemetri/ml
+# dan ml_logs untuk evaluasi. Output TIDAK dipakai menggerakkan aktuator.
+# Override tanpa edit file: env ML_SCORING_ENABLED=0|1.
+SCORING_ENABLED = os.environ.get("ML_SCORING_ENABLED", "1") == "1"
+# Model v2 dilatih dari proxy (aturan 6.6). Bila True, scoring di-skip
+# setiap kali pressure/IMU NaN -> prediction tidak pernah keluar di rig
+# tanpa sensor itu. False: NaN tetap diimpute climatology, scoring jalan,
+# kualitas ditandai lewat degraded/missing_sensors/ood.
+SCORING_BLOCK_ON_CORE_MISSING = False
 
 # ── agregasi (konsisten schema training) ──────────────
-# Dibaca juga dari feature_list.json saat runtime; nilai di sini cuma
-# fallback kalau artifact hilang. Schema/artifact menang.
+# PENTING: feature_list.json menang atas nilai di sini (ml_runner baca
+# artifact dulu). Artifact training masih 86400/D. Untuk evaluasi cepat,
+# override runtime lewat env — tidak perlu edit artifact:
+#   ML_AGG_WINDOW_SECONDS=300 python -m src.main
+# Nilai window TIDAK mengubah skala fitur (climatology/ma/std tetap sama),
+# hanya seberapa cepat satu prediksi keluar. Model tetap dianggap valid;
+# longgarkan ke <86400 hanya untuk evaluasi, bukan operasi.
 AGG_INTERVAL = "D"             # pandas offset alias; D = harian
-AGG_WINDOW_SECONDS = 86400     # 24 jam
+AGG_WINDOW_SECONDS = int(os.environ.get("ML_AGG_WINDOW_SECONDS", "300"))
 ROLLING_WINDOW = 12            # 12 langkah AGG_INTERVAL
 
 # ── fisika ────────────────────────────────────────────
