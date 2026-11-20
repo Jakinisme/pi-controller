@@ -1,17 +1,17 @@
 {
-  "checkpoint_steps": 299958272,
-  "drl_commit": "608256b224dc5e81dc541175df94256399fba4d4",
+  "checkpoint_steps": 99942400,
+  "drl_commit": "a085fb725bf13fdf8829ab1b6780dd0fc66f02d9",
   "drl_path": "drl",
   "files": {
     "models/policy.onnx": {
       "bytes": 356448,
-      "sha256": "dbb90bb8b0123dc9276f0fefc3ff270937992a8fa30e8a14e617a8af41c49913",
-      "src": "runs/r7_policy.onnx"
+      "sha256": "90359115c25635b5fc7dc308b4cab0532cf34cecc67de2585d161626bdf33d3d",
+      "src": "runs/a1_long_A/policy.onnx"
     },
     "models/policy_meta.json": {
-      "bytes": 728,
-      "sha256": "5bacf562fe4559e467e848d46cdc12a5064e1c8c56650dffa2144248c6399713",
-      "src": "runs/r7_policy_meta.json"
+      "bytes": 729,
+      "sha256": "0c6e6078dcc38087cc9ef6c1e5d3df12b7520880d5075eaf356a6a05836bd5e8",
+      "src": "runs/a1_long_A/policy_meta.json"
     },
     "src/rl/estimator.py": {
       "bytes": 3584,
@@ -34,7 +34,7 @@
       "src": "runtime/policy.py"
     }
   },
-  "iteration": 4577,
-  "source_ckpt": "runs/r7_300m/ckpt/ckpt_last.pt",
-  "synced_utc": "2026-10-28T11:04:34Z"
+  "iteration": 1525,
+  "source_ckpt": "runs/a1_long_A/ckpt/ckpt_last.pt",
+  "synced_utc": "2026-11-07T02:30:37Z"
 }

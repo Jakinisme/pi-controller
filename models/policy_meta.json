@@ -46,7 +46,7 @@
     "geofence_m": 80.0,
     "watchdog_s": 0.5
   },
-  "source_ckpt": "runs/r7_300m/ckpt/ckpt_last.pt",
-  "steps": 299958272,
-  "iteration": 4577
+  "source_ckpt": "runs/a1_long_A/ckpt/ckpt_last.pt",
+  "steps": 99942400,
+  "iteration": 1525
 }

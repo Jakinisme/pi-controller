@@ -259,11 +259,15 @@ class ASVSystem:
     # ML LOOP  (fan-out + aggregate per AGG_INTERVAL)
     # ------------------------------------------------------------------
     async def ml_loop(self):
-        """ML shadow layer: fan-out IMU/GPS read-only, aggregate per
-        AGG_INTERVAL, log + push telemetry/ml. Scoring OFF (aturan 6.6).
-        Tidak kirim perintah motor."""
+        """ML layer: fan-out IMU/GPS read-only, aggregate per AGG window,
+        log + push telemetry/ml. Output TIDAK dipakai menggerakkan motor
+        (SHADOW_MODE=True), tapi prediksi anomaly tetap keluar untuk
+        evaluasi. Window diambil dari runner (artifact/env)."""
         self.ml_fanout = MLFanout(self.imu, self.gps, self.firebase)
-        log.info("ML fan-out started (shadow, scoring=OFF)")
+        log.info(
+            "ML fan-out starting (scoring=%s, block_on_core_missing=%s)",
+            cfg_ml.SCORING_ENABLED, cfg_ml.SCORING_BLOCK_ON_CORE_MISSING,
+        )
         await self.ml_fanout.ml_loop()
 
     # ------------------------------------------------------------------

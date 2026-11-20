@@ -57,6 +57,12 @@ class RLLogger:
         "action_raw_surge", "action_raw_sway", "action_raw_yaw",
         "action_applied_surge", "action_applied_sway", "action_applied_yaw",
         "thrust_scale",
+        # Appended 2026-11-07 to close the replay gap documented above: the frozen
+        # 25-column header could not reconstruct a station-keeping heading goal or
+        # the lookahead waypoints, which `DRL/runtime/infer_replay.py` accepts and
+        # the policy was trained with. Append-only — no existing column moved.
+        "est_age_s", "goal_heading_deg", "next_lat", "next_lon",
+        "next2_lat", "next2_lon",
     )
 
     def __init__(self, log_dir, *, max_bytes=20 * 1024 * 1024,

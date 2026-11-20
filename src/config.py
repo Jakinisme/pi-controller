@@ -89,7 +89,10 @@ THRUST_DEADZONE = 0.05  # below this value, motor won't spin
 ESP32_SERIAL_PORT = "/dev/serial0"  # hardware UART to ESP32 (was /dev/ttyUSB0)
 ESP32_BAUD_RATE = 115200
 ESP32_HEARTBEAT_INTERVAL_S = 0.5    # Send heartbeat every 500ms
-ESP32_TIMEOUT_S = 1.0               # ESP32 failsafe: no msg for 1s -> shutdown motor
+ESP32_TIMEOUT_S = 2.0               # Mirrors firmware-esp FAILSAFE_TIMEOUT_MS = 2000, which
+                                    # the ESP32 enforces (not the Pi): after 2 s with no
+                                    # command frame the ESP32 idles the motors. Unused by the
+                                    # Pi protocol — kept for reference only.
 
 # ---------------------------------------------------------------------------
 # Firebase Configuration

@@ -121,22 +121,50 @@ def _goal(rng: random.Random, est: dict) -> dict:
     return goal
 
 
+def _manifest_model_paths(drl_path):
+    """The DRL-side model + meta the vendored copy was synced from.
+
+    Read from ``models/MANIFEST.json`` (written by ``tools/sync_rl_runtime.py``) instead of
+    hardcoding an export name: the vendored model changes over time (R7 -> A@100M on
+    2026-11-07) and a hardcoded path silently compares the vendored controller against a
+    *different* network, which reads as a parity failure when nothing is actually broken.
+
+    Returns ``(onnx_path, meta_path)``. Either element is ``None`` when the manifest does not
+    record it or the file is missing, in which case the caller skips.
+    """
+    with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+        files = json.load(f).get("files", {})
+    out = []
+    for key in ("models/policy.onnx", "models/policy_meta.json"):
+        src = (files.get(key) or {}).get("src")
+        out.append(os.path.join(drl_path, *src.split("/")) if src else None)
+    return tuple(out)
+
+
 # ----------------------------------------------------------------------- tests
 def test_action_parity_200_sequences(drl_path, real_model_available):
-    """200 random sequences: vendored action == DRL action within 1e-5."""
+    """200 random sequences: vendored action == DRL action within 1e-5.
+
+    The DRL-side model is the one the manifest says was synced (see
+    ``_manifest_model_paths``), so this compares two copies of the same network and only the
+    *packaging* (import rewrites, vendoring) can differ.
+    """
     if not real_model_available:
         pytest.skip("models/policy.onnx / policy_meta.json or onnxruntime missing")
+
+    drl_onnx, drl_meta = _manifest_model_paths(drl_path)
+    if not (drl_onnx and drl_meta and os.path.isfile(drl_onnx) and os.path.isfile(drl_meta)):
+        pytest.skip(f"DRL-side synced model absent ({drl_onnx!r}, {drl_meta!r})")
 
     from src.rl.policy import RLController as VendoredController
 
     DRLCtrl = _load_drl_controller(drl_path)
-    session_drl = _session(os.path.join(drl_path, "runs", "r7_policy.onnx"))
+    session_drl = _session(drl_onnx)
     session_vendor = _session(MODEL_PATH)
 
     clock_drl = _StepClock()
     clock_vendor = _StepClock()
-    drl = DRLCtrl(onnx_path=os.path.join(drl_path, "runs", "r7_policy.onnx"),
-                  meta_path=os.path.join(drl_path, "runs", "r7_policy_meta.json"),
+    drl = DRLCtrl(onnx_path=drl_onnx, meta_path=drl_meta,
                   session=session_drl, clock=clock_drl)
     vendored = VendoredController(onnx_path=MODEL_PATH, meta_path=META_PATH,
                                   session=session_vendor, clock=clock_vendor)
